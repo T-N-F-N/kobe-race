@@ -62,9 +62,12 @@ table.plan td.n{font-family:var(--f-num);font-size:19px;white-space:nowrap}
 .tiles b{font-family:var(--f-num);font-size:26px;line-height:1.1}
 .gatecard{border:2px solid var(--red);background:linear-gradient(var(--panel),var(--panel))}
 .gatecard .gname{font-weight:900;font-size:17px}
-.gatecard .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.gatecard .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) minmax(0,1.05fr) minmax(0,.85fr);gap:5px}   /* 「閉鎖まで」は 1:00:00 になるので広め、「余裕」は狭め */
 .gatecard .grid span{font-size:11px;color:var(--muted);font-weight:700;display:block}
 .gatecard .grid b{font-family:var(--f-num);font-size:24px;line-height:1.1}
+.gatecard .grid b,.gatecard .grid span{white-space:nowrap}
+.gatecard .grid b.word{font-family:inherit;font-size:16px;font-weight:900;line-height:1.5}
+.gatecard .grid b.long{font-size:21px}
 .msg{background:#2b2108;border:1.5px solid var(--gold);border-radius:12px;padding:8px 12px}
 .msg b{color:var(--gold);font-size:12px}
 .said{font-size:13px;color:var(--muted);min-height:1.5em;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
@@ -97,3 +100,18 @@ table.laps th{color:var(--muted);font-size:12px}
 @keyframes pulse{50%{opacity:.7}}
 .quick{display:flex;flex-wrap:wrap;gap:6px}
 .quick .btn{min-height:38px;padding:4px 10px;font-size:14px}
+
+/* ゴールボタン（残り1kmから） */
+.goalbtn{width:100%;min-height:110px;border-radius:22px;border:none;background:#2a9d4b;color:#fff;font-weight:900;font-size:34px;cursor:pointer;display:grid;place-content:center;gap:2px;box-shadow:inset 0 -6px 0 rgba(0,0,0,.25);touch-action:manipulation;user-select:none}
+.goalbtn small{font-size:14px;font-weight:700;opacity:.9}
+.goalbtn.armed{background:#f5b83d;color:#000}
+.mapbar{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
+.mapbar .btn{min-height:34px;padding:2px 10px;font-size:13px}
+/* 地図の数字・関門の名前 */
+.leaflet-tooltip.kmlbl{background:#fff;color:#000;border:1px solid #333;border-radius:4px;padding:0 3px;font:700 11px/1.3 system-ui,sans-serif;box-shadow:none}
+.leaflet-tooltip.kmlbl:before,.leaflet-tooltip.gatelbl:before{display:none}
+.leaflet-tooltip.gatelbl{background:#1060ff;color:#fff;border:none;border-radius:4px;padding:1px 5px;font:700 11px/1.3 system-ui,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.leaflet-tooltip.gatelbl.start{background:#2a9d4b}
+.leaflet-tooltip.gatelbl.fin{background:#e8202a}
+.zfar .leaflet-tooltip.kmlbl.minor{display:none}
+.zvfar .leaflet-tooltip.gatelbl:not(.start):not(.fin){display:none}

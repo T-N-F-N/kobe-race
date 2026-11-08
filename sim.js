@@ -20,7 +20,7 @@ window.Sim = (()=>{
     s.ox = (s.ox||0)*0.85 + gauss()*n*0.5; s.oy = (s.oy||0)*0.85 + gauss()*n*0.5;
     const lat = p[0] + s.oy/110540, lon = p[1] + s.ox/(111320*Math.cos(p[0]*Math.PI/180));
     const pace = (App.R && App.R.plan ? E.paceAt(App.R.plan, s.km) : 480) / s.factor;
-    App.onFix({lat, lon, acc: n > 20 ? 30 : 8, t:s.t, speed: Math.max(0, 1000/pace + gauss()*0.15)});
+    App.onFix({lat, lon, acc: n > 20 ? 30 : 8, t:s.t, speed: s.km >= c.total ? 0 : Math.max(0, 1000/pace + gauss()*0.15)});   // フィニッシュに着いたら止まる
   }
   function tick(){
     const R = App.R; if(!R || !s.on) return;
@@ -97,5 +97,5 @@ window.Sim = (()=>{
     updateBar();
   });
 
-  return {now, start, stop, open, bar, updateBar, resume(){ /* 再読み込みしたらシミュレーションは終わり */ }, get speed(){ return s.speed; }, get on(){ return s.on; }};
+  return {now, start, stop, open, bar, updateBar, tick, resume(){ /* 再読み込みしたらシミュレーションは終わり */ }, get speed(){ return s.speed; }, get on(){ return s.on; }};
 })();

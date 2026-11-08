@@ -284,6 +284,7 @@ E.gateButtonText = function(st){
 };
 E.finishText = function(st){
   const rem = Math.max(0, st.finishKm - st.dist);
+  if(rem < 0.05) return "ゴール予定地点付近です。ゴールしたら、ゴールボタンを押してください。";
   let s = `フィニッシュまで、あと${E.spDist(rem)}。`;
   if(st.finishClose != null){ const left = st.finishClose - st.clock; if(left > 0) s += `制限時間まで${E.spLeft(left)}。`; }
   if(st.plan){ s += `目標ペース${E.spPace(E.paceAt(st.plan, st.dist))}、ゴール予想${E.spClock(st.clock + E.timeBetween(st.plan, st.dist, st.finishKm))}。`; }
@@ -307,7 +308,8 @@ E.overText = () => "目標ペースよりも少し速いペースです。少し
 E.hillText = (meters, name) => `この先${Math.max(50, Math.round(meters/50)*50)}メートルで、${name ? name + "の" : ""}上り坂です。時間に余裕があります。上り坂は無理して走る必要はありません。戦略的に歩いて、登り切ったら走り始めましょう。`;
 // 関門を通過したとき
 E.passText = function(st, g){
-  let s = `${g.name}、通過。閉鎖の${E.spMin(g.close - st.clock)}前。`;
+  const lf = g.close - st.clock;
+  let s = `${g.name}、通過。` + (lf >= 1 ? `閉鎖の${E.spMin(lf)}前。` : "");   // 閉鎖後の通過（GPSの遅れなど）では時間を言わない
   if(st.base){ s += E.diffWords(st.clock - E.etaAt(st.base, g.km), "cum") + "。"; }
   const n = E.nextGate(st);
   if(n){ s += `次は${n.name}、${E.spDist(n.km - st.dist)}先、${E.spClock(n.close)}閉鎖。`; if(st.plan) s += `目標ペース${E.spPace(E.paceAt(st.plan, st.dist + 0.01))}。`; }
