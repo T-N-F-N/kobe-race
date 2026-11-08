@@ -1,6 +1,6 @@
 "use strict";
 /* =========================================================
-   見守り画面（応援する人用）
+   応援画面（応援する人用）
    - ランナーの状況（30秒ごと）を表示
    - 文字のメッセージ → ランナーのスマホで読み上げ
    - 録音した声 → ランナーのスマホで再生
@@ -29,12 +29,12 @@ window.Watch = (()=>{
   function render(app){
     root = app;
     app.innerHTML = `<div class="wrap">
-      <div class="hdr"><div class="brand">KOBE <span>見守り</span></div>${cfgOk() ? `<button class="btn ghost" data-w="reset">接続をやり直す</button>` : ""}</div>
+      <div class="hdr"><div class="brand">KOBE <span>応援</span></div></div>
       ${cfgOk() ? "" : `<div class="card"><b>共有の設定</b>
         <label class="field">ウェブアプリのURL<input class="inp" id="wurl" placeholder="https://script.google.com/macros/s/…/exec"></label>
         <label class="field">合言葉<input class="inp" id="wkey"></label>
         <button class="btn primary" data-w="conn">接続する</button>
-        <p class="small muted">ランナーから送られた「見守り用リンク」を開くと、自動で入ります。</p></div>`}
+        <p class="small muted">ランナーから送られた「応援用リンク」を開くと、自動で入ります。</p></div>`}
       <div class="card" id="wstatecard"><div class="spread"><b id="wstate">読み込み中…</b><button class="btn ghost" data-w="refresh">更新</button></div><div class="small" id="wstate2"></div></div>
       <div id="wbody"></div>
       <div class="card" id="wmapcard" hidden>
@@ -56,6 +56,7 @@ window.Watch = (()=>{
         <div id="wprev" hidden class="row"><audio id="waudio" controls style="flex:1;min-width:0"></audio><button class="btn primary" data-w="sendvoice">この声を送る</button><button class="btn ghost" data-w="discard">やめる</button></div>
         <div id="wmsgs"></div>
       </div>
+      ${cfgOk() ? `<p class="small muted" style="text-align:right"><button class="btn ghost" data-w="reset" style="min-height:30px;padding:2px 10px;font-size:12px">接続をやり直す（ふつうは使いません）</button></p>` : ""}
       <p class="small muted">ランナーのアプリから30秒ごとに状況が届きます。メッセージは、ランナーのアプリが次に通信したとき（最大30秒ほど）に読み上げ・再生されます。</p>
     </div>`;
     if(W.map){ try{ W.map.remove(); }catch(e){} } W.map = null; W.layers = {}; W.centered = false;
@@ -90,7 +91,7 @@ window.Watch = (()=>{
   function paintState(){
     const el = document.getElementById("wstate"), el2 = document.getElementById("wstate2"), card = document.getElementById("wstatecard"); if(!el) return;
     const lv = W.live;
-    if(W.err){ el.textContent = "⚠ " + W.err; el2.textContent = "見守り画面の通信がうまくいっていません。電波を確認してください"; return; }
+    if(W.err){ el.textContent = "⚠ " + W.err; el2.textContent = "応援画面の通信がうまくいっていません。電波を確認してください"; return; }
     if(!lv){ el.textContent = "まだ計測の記録がありません"; el2.textContent = "ランナーが「スタート」を押すと、ここに状況が出ます"; return; }
     const st = appStatus(lv);
     el.textContent = (lv.sim ? "【シミュレーション】" : "") + st.t; el.style.color = st.c; el2.textContent = st.d;
@@ -258,7 +259,7 @@ window.Watch = (()=>{
   document.addEventListener("click", e=>{
     const b = e.target.closest("[data-w]"); if(!b) return;
     const a = b.dataset.w;
-    if(a === "reset"){ if(!confirm("共有の設定を消して、入れ直しますか？")) return; conf.url = ""; conf.key = ""; save(); W.live = null; render(root); }
+    if(a === "reset"){ if(!confirm("接続の設定を消します。消すと、もう一度「応援用リンク」を開くまで状況が見られなくなります。消しますか？")) return; conf.url = ""; conf.key = ""; save(); W.live = null; render(root); }
     if(a === "refresh") poll();
     if(a === "center" && W.map && W.live){ const e = estimate(W.live); if(e.pos || W.live.pos) W.map.setView(e.pos || W.live.pos, Math.max(W.map.getZoom(), 15)); }
     if(a === "unspot"){ conf.spot = null; save(); if(W.map && W.layers.spot) W.map.removeLayer(W.layers.spot); moveEst(); }

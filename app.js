@@ -274,7 +274,7 @@ function predict(){
 }
 
 /* =========================================================
-   共有（見守り）：30秒ごとに状況を送り、メッセージを受け取る
+   共有（応援）：30秒ごとに状況を送り、メッセージを受け取る
    ========================================================= */
 const Sync = {
   get ok(){ return !!(S.sync.url && S.sync.key); },
@@ -301,7 +301,7 @@ const Live = {
       predPlan:p ? Math.round(p.plan) : null, predRecent:p && p.recent ? Math.round(p.recent) : null,
       pos:R.lastPos || null, acc:gpsAcc ? Math.round(gpsAcc) : null, track:R.track.slice(-150), gate,
       laps:R.laps.slice(-45).map(l=>[l.km, Math.round(l.sec), Math.round(l.sec - l.target), l.partial ? 1 : 0]),
-      // アプリの状態（見守り側で「動いているか」を見るため）
+      // アプリの状態（応援側で「動いているか」を見るため）
       app:{native:!!Native, gpsAge: Math.round((Date.now() - (R.lastFixAt || R.startWall || Date.now()))/1000), battery: batt.level, charging: batt.charging, hidden: document.hidden}};
   },
   async push(final){
@@ -343,7 +343,7 @@ let netMsg = "";
 // 電池の残り（取れる端末だけ）
 const batt = {level:null, charging:null};
 try{ navigator.getBattery && navigator.getBattery().then(b=>{ const up = ()=>{ batt.level = Math.round(b.level*100); batt.charging = b.charging; }; up(); b.addEventListener("levelchange", up); b.addEventListener("chargingchange", up); }).catch(()=>{}); }catch(e){}
-// 生存の合図：GPSが取れないときも、30秒ごとに見守りへ送る（画面OFFでも動く）
+// 生存の合図：GPSが取れないときも、30秒ごとに応援画面へ送る（画面OFFでも動く）
 setInterval(()=>{ if(R && nowMs() - R.lastLive > 30000) Live.push(); }, 10000);
 function setNet(t){ netMsg = t; const el = $("net"); if(el) el.textContent = t; }
 function showMsg(m){ R && (R.lastMsg = {text:m.voice ? "🎤 声のメッセージ" : m.text, from:m.from || "", at:Date.now()}); updateRun(); }
@@ -554,13 +554,13 @@ function openSettings(){
       <label class="chk"><input type="checkbox" name="kvol" ${S.keys.volume?"checked":""}> 音量ボタンを2回すばやく押して読み上げる（試験的・機種により動かない）</label>
       <p class="small muted">音量ボタンを使う設定にすると、計測中は音量ボタン1回押しでの音量調整が少し遅れて反応します。</p>
     </section>
-    <section class="card"><h3>見守り（共有）</h3>
+    <section class="card"><h3>応援（共有）</h3>
       <label class="field">ウェブアプリのURL（Apps Script）<input class="inp" name="surl" value="${esc(S.sync.url)}" placeholder="https://script.google.com/macros/s/…/exec"></label>
       <label class="field">合言葉<input class="inp" name="skey" value="${esc(S.sync.key)}"></label>
-      <label class="field">ランナーの名前（見守り画面に表示）<input class="inp" name="sname" value="${esc(S.sync.name)}"></label>
-      <label class="field">見守りページのURL（GitHub Pagesで公開した web フォルダ）<input class="inp" name="spage" value="${esc(S.sync.page||"")}" placeholder="https://ユーザー名.github.io/kobe-race/"></label>
-      <label class="chk"><input type="checkbox" name="ssim" ${S.sync.simShare?"checked":""}> シミュレーション中も見守りに送る（テスト用）</label>
-      <div class="row"><button type="button" class="btn" data-act="synctest">接続テスト</button><button type="button" class="btn" data-act="watchlink">見守り用リンクをコピー</button></div>
+      <label class="field">ランナーの名前（応援画面に表示）<input class="inp" name="sname" value="${esc(S.sync.name)}"></label>
+      <label class="field">応援ページのURL（GitHub Pagesで公開した web フォルダ）<input class="inp" name="spage" value="${esc(S.sync.page||"")}" placeholder="https://ユーザー名.github.io/kobe-race/"></label>
+      <label class="chk"><input type="checkbox" name="ssim" ${S.sync.simShare?"checked":""}> シミュレーション中も応援画面に送る（テスト用）</label>
+      <div class="row"><button type="button" class="btn" data-act="synctest">接続テスト</button><button type="button" class="btn" data-act="watchlink">応援用リンクをコピー</button></div>
     </section>
     <section class="card"><h3>開発用</h3>
       <label class="chk"><input type="checkbox" name="sim" ${S.sim?"checked":""}> シミュレーションのボタンを表示する</label>
@@ -583,9 +583,9 @@ function openSettings(){
       if(!url || !key){ toast("URLと合言葉を入れてください"); return; }
       if(act === "synctest"){ const keep = S.sync; S.sync = {...S.sync, url, key}; Sync.post({ping:1}).then(()=>toast("接続できました")).catch(e=>toast(e.message)).finally(()=>{ S.sync = keep; }); }
       else { const page = f.spage.value.trim() || (/^https?:\/\/(localhost|127\.)/.test(location.href) ? "" : location.href.split("#")[0].split("?")[0]);
-        if(!page){ toast("見守りページのURLを入れてください"); return; }
+        if(!page){ toast("応援ページのURLを入れてください"); return; }
         const link = page.replace(/(index|watch)\.html$/, "").replace(/\/?$/, "/") + "watch.html#u=" + encodeURIComponent(url) + "&k=" + encodeURIComponent(key);
-        (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(()=>toast("コピーしました。見守る人に送ってください")).catch(()=>prompt("このリンクを見守る人に送ってください", link)); }
+        (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(()=>toast("コピーしました。応援する人に送ってください")).catch(()=>prompt("このリンクを応援する人に送ってください", link)); }
     }
   });
   f.addEventListener("submit", e=>{
@@ -663,7 +663,7 @@ setInterval(()=>{ if(R && !document.hidden) updateRun(); }, 1000);
 
 window.App = {
   boot(){
-    if(location.hash.startsWith("#watch") && !Native){ location.replace("watch.html" + location.hash); return; }   // 以前の見守り用リンク
+    if(location.hash.startsWith("#watch") && !Native){ location.replace("watch.html" + location.hash); return; }   // 以前の応援用リンク
     // 12時間以上前に始めた計測（練習で「終了」を押し忘れたものなど）は、終わったことにする。本番の日に古い計測が続かないように
     if(R && !R.sim && Date.now() - (R.startWall || 0) > 12*3600000){ R = null; persist(true); setTimeout(()=>toast("前回の計測（終了を押し忘れたもの）を終わりにしました"), 500); }
     if(R){ if(R.sim){ R = null; persist(true); } else { makeTracker(); startGps(); keysEnable(); view = "run"; } }   // シミュレーションは再読み込みで終わり
