@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>コース確認</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  html,body{margin:0;height:100%;font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;background:#fff;color:#111}
+  #bar{position:fixed;top:0;left:0;right:0;z-index:1000;background:#0a1f3a;color:#fff;padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  #bar b{margin-right:6px}
+  #bar button{font:inherit;font-size:13px;border:1px solid #6a85a8;background:#17304f;color:#fff;border-radius:8px;padding:5px 9px;cursor:pointer}
+  #map{position:fixed;top:48px;left:0;right:0;bottom:0}
+  .lg{font-size:12px;opacity:.85;width:100%}
+  .km{font-size:11px;font-weight:700;background:#fff;border:1px solid #333;border-radius:4px;padding:0 3px}
+</style>
+</head>
+<body>
+<div id="bar"><b>コース確認</b>
+  <button data-v="all">全体</button><button data-v="start">スタート〜工業技術センター</button><button data-v="west">須磨〜大蔵海岸</button><button data-v="end">31km〜ゴール</button>
+  <span class="lg">赤：アプリのコース ／ 青丸：関門 ／ 緑の円：通過で距離を合わせ直す地点（半径50m） ／ 黒丸：1kmごと（数字は5kmごと）</span>
+</div>
+<div id="map"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="course.js"></script>
+<script src="engine.js"></script>
+<script>
+const C = KOBE_COURSE, E = Engine;
+const GATES = [["御旅公園",3.8,"10:00"],["工業技術センター",8.0,"10:36"],["須磨一ノ谷プラザ",10.7,"10:59"],["舞子公園",17.5,"11:57"],["大蔵海岸西",20.7,"12:25"],["舞子駅",23.9,"12:53"],["垂水下水処理場",27.1,"13:23"],["須磨一ノ谷プラザ",31.1,"14:02"],["須磨海浜公園",32.7,"14:18"],["駒ヶ林会館",35.4,"14:46"],["中央卸売市場第7門",39.8,"15:33"]];
+const map = window.LMAP = L.map("map");
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}).addTo(map);
+L.polyline(C.pts.map(p=>[p[0],p[1]]), {color:"#e8202a", weight:5, opacity:.85}).addTo(map);
+for(let k=1;k<42;k++){
+  const p = E.pointAtKm(C, k), m = L.circleMarker(p, {radius:k%5?2.5:4, color:"#000", weight:1, fillColor:"#000", fillOpacity:1}).addTo(map);
+  m.bindTooltip(k + "km", {permanent:k%5===0, direction:"right", className:"km"});
+}
+(C.anchors||[]).forEach(a=>L.circle([a.lat,a.lon], {radius:50, color:"#0a0", weight:2, fillOpacity:.12}).addTo(map));
+GATES.forEach(([n,km,t])=>L.circleMarker(E.pointAtKm(C,km), {radius:7, color:"#fff", weight:2, fillColor:"#1060ff", fillOpacity:1}).bindTooltip(`${n}<br>${km}km・${t}閉鎖`, {direction:"left"}).addTo(map));
+L.marker(C.pts[0].slice(0,2)).bindTooltip("スタート", {permanent:true, direction:"top"}).addTo(map);
+L.marker(C.pts[C.pts.length-1].slice(0,2)).bindTooltip("フィニッシュ", {permanent:true, direction:"bottom"}).addTo(map);
+L.circleMarker([34.6724147,135.1643196], {radius:5, color:"#a0f", fillOpacity:1}).bindTooltip("御旅公園（Googleマップの位置）").addTo(map);
+const seg = (a,b) => L.latLngBounds(C.pts.filter(p=>p[2]>=a && p[2]<=b).map(p=>[p[0],p[1]])).pad(0.08);
+const views = {all:seg(0,42.2), start:seg(0,8.2), west:seg(10,21), end:seg(31,42.2)};
+document.getElementById("bar").addEventListener("click", e=>{ const v = e.target.dataset && e.target.dataset.v; if(v) map.fitBounds(views[v]); });
+map.fitBounds(views.all);
+</script>
+</body>
+</html>
