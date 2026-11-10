@@ -37,10 +37,42 @@ let R = load(RUN_KEY);   // 計測中の状態
 let T = null;            // Tracker
 let watchId = null, gpsAcc = null, lastSaid = "", view = "home", finishArmed = false, goalArmed = false, wakeLock = null, map = null, mapLayers = {}, mapFollow = true;
 const LAST_KEY = "kobe-last-v1";   // 前回の結果（ホームに出す）
+const REC_KEY = "kobe-records-v1";   // 記録：本番・練習の結果。アプリの中からは消せない（上書きもしない）
+const PREV_KEY = "kobe-prev-run-v1"; // 直前に終了した計測（間違えて終了したときに続けられるように）
+function recordOf(goal){
+  const el = elapsed(), d = T ? T.dist : 0;
+  return {id:R.startWall, at:Date.now(), mode:R.raceDay ? "本番" : "練習", goal:!!goal, date:todayStr(),
+    start:E.fmtClockS(R.startClock), finish:E.fmtClockS(R.startClock + el), el:Math.round(el), dist:+d.toFixed(3),
+    splits:(R.splits || []).map(x=>({...x})), laps:R.laps.map(l=>[l.km, Math.round(l.sec), l.partial ? 1 : 0])};
+}
+// 同じ計測（id）は新しい内容で置き換える。別の計測は消さずに足していく
+function saveRecord(rec){
+  const all = load(REC_KEY) || [];
+  const i = all.findIndex(r=>r.id === rec.id);
+  if(i >= 0) all[i] = rec; else all.push(rec);
+  store(REC_KEY, all);
+  // 本番の記録は、念のため別の場所にも残す
+  if(rec.mode === "本番") store("kobe-race-record-" + rec.date, rec);
+  // サーバー（Googleのスプレッドシート）にも送る（届くまで何回か送り直す）
+  if(Sync.ok){ (async()=>{ for(let k=0;k<5;k++){ try{ await withTimeout(Sync.post({record:rec}), 25000); Diag.log("記録をサーバーに保存"); return; }catch(e){ await new Promise(ok=>setTimeout(ok, 8000)); } } Diag.log("記録をサーバーに送れませんでした（スマホの中には保存済み）"); })(); }
+}
 
 function load(k){ try{ return JSON.parse(localStorage.getItem(k) || "null"); }catch(e){ return null; } }
 function store(k, v){ try{ v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 const saveS = () => store(SET_KEY, S);
+/* ---------- 診断ログ（不具合のとき、何が起きたかを後から見るため。最新400行） ---------- */
+const DIAG_KEY = "kobe-diag-v1";
+const Diag = {
+  lines: load(DIAG_KEY) || [], savedAt: 0,
+  log(t){ const d = new Date(); this.lines.push(`${d.getHours()}:${E.pad(d.getMinutes())}:${E.pad(d.getSeconds())} ${t}`); if(this.lines.length > 400) this.lines.splice(0, this.lines.length - 400); if(Date.now() - this.savedAt > 30000) this.save(); },
+  save(){ this.savedAt = Date.now(); store(DIAG_KEY, this.lines); },
+};
+// 画面の処理が止まっていないか（1秒ごとのタイマーが3秒以上遅れたら記録）
+let lagLast = Date.now();
+setInterval(()=>{ const now = Date.now(), lag = now - lagLast - 1000; lagLast = now; if(lag > 3000 && !document.hidden) Diag.log(`処理の遅れ ${(lag/1000).toFixed(1)}秒`); }, 1000);
+// GPSの受け取りの集計（1分ごと）
+const gpsStat = {n:0, used:0, fast:0, acc:0, still:0, near:0, at:Date.now()};
+function gpsStatFlush(){ if(Date.now() - gpsStat.at < 60000) return; if(R) Diag.log(`GPS 1分: 受信${gpsStat.n} 使用${gpsStat.used} 速すぎ${gpsStat.fast} 精度不足${gpsStat.acc} 停止${gpsStat.still} 近すぎ${gpsStat.near} 距離${T ? T.dist.toFixed(2) : "-"}km`); Object.assign(gpsStat, {n:0, used:0, fast:0, acc:0, still:0, near:0, at:Date.now()}); }
 // 通信や再生が終わらないまま固まらないよう、時間で打ち切る
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, ng)=>setTimeout(()=>ng(new Error("時間切れ")), ms))]);
 const $ = id => document.getElementById(id);
@@ -94,6 +126,18 @@ function say(text, interrupt, onend){
   }catch(e){ onend && onend(); }
 }
 
+// 自動の読み上げ（1kmごと・関門通過など）：話している途中に次が来たら、待っている古い案内は捨てて最新だけ読む
+const AutoVoice = {
+  busy:false, pending:null, since:0,
+  say(text){
+    if(this.busy && Date.now() - this.since > 60000) this.busy = false;   // 終わりの知らせが来なかったときの保険
+    if(this.busy){ if(this.pending) Diag.log("古い案内を省略: " + this.pending.slice(0, 20)); this.pending = text; return; }
+    this.busy = true; this.since = Date.now();
+    say(text, false, ()=>{ this.busy = false; const n = this.pending; this.pending = null; if(n) this.say(n); });
+  },
+  clear(){ this.pending = null; },
+};
+
 /* ---------- 本体の追加機能（アプリ版のみ：通知のボタン・イヤホン・音量ボタン・音声再生） ---------- */
 const Native = (()=>{
   const cap = window.Capacitor, ex = window.capacitorExports;
@@ -133,6 +177,7 @@ function startRun(opt){
   let startClock;
   if(opt.clock != null) startClock = opt.clock;
   else if(!sim && isRaceDay()) startClock = clockOfDay(t);        // 本番：実際の時刻
+  else if(S.practiceCross === "now" && !sim) startClock = clockOfDay(t);   // 練習「本番と同じ」：押した時刻のまま
   else startClock = E.parseHM(S.practiceCross) || E.parseHM("09:20"); // 練習・シミュレーション：選んだ時刻とみなす
   R = {sim, startT:t, startWall:Date.now(), startClock, tracker:null, laps:[], lastLapEl:0, nextKm:1, passed:[], track:[], lastLive:0, lastVoice:0, savedAt:0, plan:null, base:null, raceDay:!sim && isRaceDay()};
   makeTracker();
@@ -140,6 +185,7 @@ function startRun(opt){
   const g = E.nextGate(st());
   say(`計測を開始しました。スタート${E.spClock(startClock)}。最初の目標ペースは${E.spPace(E.paceAt(R.plan, 0))}。` + (g ? `最初の関門、${g.name}は${E.spClock(g.close)}閉鎖です。` : ""), true);
   persist(true);
+  Diag.log(`計測開始 ${sim ? "シミュレーション" : R.raceDay ? "本番" : "練習"} スタート${E.fmtClockS(startClock)}`);
   if(!sim || Native) startGps();   // アプリ版はシミュレーションでもGPSを動かす（本番と同じく、画面OFFでも止まらない状態にする）
   keysEnable(); keepAwake();
   view = "run"; render();
@@ -151,12 +197,16 @@ function finishRun(goal){
   else say(`お疲れさまでした。${E.spDist(d)}、${E.spSec(el)}。`, true);
   if(R) R.goal = !!goal;
   Live.push(true);
-  store(LAST_KEY, {at:Date.now(), goal:!!goal, sim:!!(R && R.sim), dist:+d.toFixed(2), el:Math.round(el)});
+  store(LAST_KEY, {at:Date.now(), goal:!!goal, sim:!!(R && R.sim), dist:+d.toFixed(2), el:Math.round(el), id:R ? R.startWall : null});
   if(R && R.sim && window.Sim) Sim.stop();
   stopGps(); keysDisable();
   try{ wakeLock && wakeLock.release(); }catch(e){}
-  const hist = load("kobe-history-v1") || [];
-  if(R && !R.sim){ hist.push({at:Date.now(), dist:+d.toFixed(2), el:Math.round(el), laps:R.laps.map(l=>[l.km, Math.round(l.sec)])}); store("kobe-history-v1", hist.slice(-20)); }
+  if(R && !R.sim){
+    saveRecord(recordOf(goal));
+    R.tracker = T ? T.export() : null; R.finishedAt = Date.now();
+    store(PREV_KEY, R);   // 間違えて終了したときに続けられるように
+  }
+  Diag.log(goal ? "ゴール" : "終了"); Diag.save();
   R = null; T = null; persist(true); finishArmed = false; goalArmed = false; view = "home"; render();
 }
 function persist(force){
@@ -186,6 +236,9 @@ function onFix(f){
   const prev = T.dist, el = Math.max(0, (f.t - R.startT)/1000);     // 位置を測った時点の経過時間
   const evs = T.fix(f);
   const accepted = T.s.last && T.s.last.t === f.t;
+  gpsStat.n++; if(T.s.rej) gpsStat[T.s.rej]++; else if(accepted) gpsStat.used++;
+  evs.forEach(e=>Diag.log(`距離の補正 ${e.type}${e.name ? " " + e.name : ""} ${e.delta != null ? (e.delta >= 0 ? "+" : "") + (e.delta*1000).toFixed(0) + "m" : ""}`));
+  gpsStatFlush();
   const d = T.dist;
   const jumped = evs.some(e=>e.type !== "anchor" || Math.abs(e.delta) > 0.05) || (accepted && R.lastFixEl != null && el - R.lastFixEl > 30);
   const tr = R.track[R.track.length-1];
@@ -207,7 +260,7 @@ function onFix(f){
   if(R.laps.length - lapsBefore > 1 || (kmLap && jumped)) R.laps.slice(lapsBefore).forEach(l=>{ l.partial = true; });
   // 関門の通過
   const passedNow = [];
-  st().gates.forEach(g=>{ const key = g.name + "@" + g.km; if(d >= g.km + 0.05 && !R.passed.includes(key)){ R.passed.push(key); passedNow.push(g); } });
+  st().gates.forEach(g=>{ const key = g.name + "@" + g.km; if(d >= g.km + 0.05 && !R.passed.includes(key)){ R.passed.push(key); passedNow.push(g); (R.splits = R.splits || []).push({name:g.name, km:g.km, el:Math.round(el), clock:E.fmtClockS(R.startClock + el), close:E.fmtClock(g.close)}); } });
   if(kmLap || passedNow.length || evs.length){   // 距離を補正したときも、計画を作り直す
     const before = E.paceAt(R.plan, d + 0.01);
     R.plan = newPlan();
@@ -239,7 +292,7 @@ function onFix(f){
   if(!R.goalSaid && (d >= 42.195 || R.nearFinish)){ R.goalSaid = true; R.nearFinish = true; speech.length = 0; speech.push("ゴール予定地点付近です。ゴールしたら、ゴールボタンを押してください。"); }
   const every = Number(S.voice.every) || 0;
   if(!speech.length && every && el - R.lastVoice >= every*60) speech.push(statusText());
-  if(speech.length){ R.lastVoice = el; speech.forEach(t=>say(t)); }
+  if(speech.length){ R.lastVoice = el; const txt = speech.join(""); Diag.log("読み上げ: " + txt.slice(0, 40)); AutoVoice.say(txt); }
   if(accepted){ R.lastFixEl = el; R.lastFixAt = Date.now(); }
   if(nowMs() - R.lastLive > 30000) Live.push();
   persist();
@@ -249,8 +302,13 @@ function onFix(f){
 /* ---------- ボタン ---------- */
 function onPress(kind, source){
   if(!R){ say("計測していません。", true); return; }
+  const t0 = performance.now();
   R.plan = newPlan();
-  say(kind === "status" ? statusText() : E.gateButtonText(st()), true);
+  AutoVoice.clear();   // ボタンの読み上げを優先（待っている自動の案内は捨てる）
+  const text = kind === "status" ? statusText() : E.gateButtonText(st());
+  say(text, true);
+  const bb = document.querySelector(".bigbtn"); if(bb){ bb.classList.add("pressed"); setTimeout(()=>bb.classList.remove("pressed"), 600); }
+  Diag.log(`ボタン(${source || "画面"}) 計算${Math.round(performance.now() - t0)}ms`);
   if(source && source !== "screen") toast(source === "volume" ? "音量ボタンで読み上げ" : source === "media" ? "イヤホンのボタンで読み上げ" : "通知のボタンで読み上げ");
   updateRun();
 }
@@ -321,7 +379,8 @@ const Live = {
       // 計測を始める前に送られたメッセージ（前回のテストの残りなど）は読まずに「届いた」にする
       if(fresh.length){ this.ack(fresh.map(m=>m.id)); Sync.post({ack:fresh.map(m=>m.id)}).catch(()=>{}); fresh.filter(m=>!(m.at < (R.startWall || 0) - 60000)).forEach(m=>this.queue.push(m)); this.drain(); }
       setNet("");
-    }catch(e){ setNet("共有：通信できません"); }
+      if(this.failN) Diag.log(`送信が回復（${this.failN}回失敗のあと）`); this.failN = 0;
+    }catch(e){ setNet("共有：通信できません"); this.failN = (this.failN || 0) + 1; if(this.failN <= 3 || this.failN % 10 === 0) Diag.log(`送信失敗${this.failN}回目: ${e && e.message || e}`); }
     this.busy = false;
   },
   playing:false,
@@ -368,15 +427,17 @@ function planTable(plan){
 
 function renderHome(app){
   const race = isRaceDay();
-  const cross = E.parseHM(S.practiceCross) || E.parseHM("09:20");
+  const nowMode = S.practiceCross === "now";
+  const cross = nowMode ? clockOfDay(Date.now()) : (E.parseHM(S.practiceCross) || E.parseHM("09:20"));
   const plan = E.makePlan(cfg(), 0, race ? Math.max(E.parseHM(S.gun), clockOfDay(Date.now())) : cross);
   const choices = ["09:05","09:10","09:15","09:20","09:25","09:30"];
   app.innerHTML = `<div class="wrap">
     <div class="hdr"><div class="brand">KOBE <span>42.195</span></div><span class="chip">${race ? "本番当日" : "練習モード"}</span></div>
     ${race ? `<div class="card"><b>スタートラインを越えたら押してください</b><p class="small muted">押した時刻（今の時計）で関門までの計算をします。号砲は${esc(S.gun)}。</p></div>`
       : `<div class="card"><b>練習：スタートを押した時刻を、何時とみなしますか？</b>
-        <div class="picker">${choices.map(c=>`<button data-cross="${c}" aria-pressed="${E.parseHM(c)===cross}">${c.replace(/^0/,"")}</button>`).join("")}</div>
-        <p class="small muted">本番（${esc(S.raceDate)}）は、押した時刻そのままで計算します。</p></div>`}
+        <div class="picker">${choices.map(c=>`<button data-cross="${c}" aria-pressed="${!nowMode && E.parseHM(c)===cross}">${c.replace(/^0/,"")}</button>`).join("")}<button data-cross="now" aria-pressed="${nowMode}" style="grid-column:1/-1">本番と同じ（押した時刻のまま）</button></div>
+        <p class="small muted">本番（${esc(S.raceDate)}）は、押した時刻そのままで計算します。「本番と同じ」を選ぶと、練習でも本番とまったく同じ計算になります（朝9時ごろに試すと、関門の時刻も本番どおりになります）。</p></div>`}
+    ${prevRunCard()}
     ${lastResult()}
     <button class="btn go wide startbtn" data-act="start">スタート</button>
     <div class="card"><div class="spread"><b>${race ? "今スタートした場合" : E.fmtClock(cross) + "スタートの場合"}の計画</b><span class="small muted">関門ごとの余裕を確保するよう自動補正</span></div>
@@ -386,11 +447,43 @@ function renderHome(app){
       <button class="btn" data-act="settings">設定</button>
       ${window.Sim && S.sim ? `<button class="btn" data-act="sim" style="border-color:var(--gold);color:var(--gold)">シミュレーション</button>` : ""}
       <button class="btn ghost" data-act="voicetest">音声テスト</button>
+      <button class="btn" data-act="records">記録</button>
     </div>
     ${Native ? "" : `<p class="small muted">ブラウザで開いています。画面を消すと計測が止まるので、レースではAndroidアプリ版を使ってください。</p>`}
   </div>`;
 }
 
+function prevRunCard(){
+  const p = load(PREV_KEY); if(!p || !p.finishedAt || Date.now() - p.finishedAt > 2*3600000 || p.goal) return "";
+  return `<div class="card" style="border-color:var(--gold)"><b>間違えて終了しましたか？</b><p class="small muted">${new Date(p.finishedAt).getHours()}:${E.pad(new Date(p.finishedAt).getMinutes())}に終了した計測を、そのまま続けられます（終了してから2時間以内）。</p><button class="btn" data-act="resume">終了した計測を続ける</button></div>`;
+}
+function resumeRun(){
+  const p = load(PREV_KEY); if(!p) return;
+  if(!confirm("終了した計測を続けますか？（スタートからの時間はそのまま続きます）")) return;
+  R = p; delete R.finishedAt; R.goal = false; store(PREV_KEY, null);
+  makeTracker(); persist(true); startGps(); keysEnable(); view = "run"; render();
+  Diag.log("終了した計測を再開"); say("計測を続けます。", true); Live.push();
+}
+function openRecords(){
+  const all = (load(REC_KEY) || []).slice().reverse();
+  const bg = document.createElement("div"); bg.className = "sheet-bg";
+  const one = r => `<section class="card"><div class="spread"><b>${esc(r.date)} ${esc(r.mode)}${r.goal ? " 🏁完走" : ""}</b><span class="num">${E.fmtDur(r.el)}</span></div>
+    <div class="small">スタート ${esc(r.start)}・${r.goal ? "ゴール" : "終了"} ${esc(r.finish)}・${Number(r.dist).toFixed(2)}km${r.note ? "・" + esc(r.note) : ""}</div>
+    ${r.splits && r.splits.length ? `<table class="laps"><tr><th>関門</th><th>通過</th><th>閉鎖</th><th>経過</th></tr>${r.splits.map(x=>`<tr><td style="text-align:left">${esc(x.name)}</td><td class="num">${esc(x.clock)}</td><td class="num">${esc(x.close)}</td><td class="num">${E.fmtDur(x.el)}</td></tr>`).join("")}</table>` : ""}
+    <details><summary class="small">1kmごとのラップ</summary><div class="small num" style="columns:3">${(r.laps||[]).map(l=>`${l[0]}km ${E.fmtPace(l[1])}${l[2] ? "*" : ""}`).join("<br>")}</div></details></section>`;
+  bg.innerHTML = `<div class="sheet"><div class="spread"><h2>記録</h2><button type="button" class="btn ghost" data-close>閉じる</button></div>
+    <p class="small muted">練習・本番で「終了」「ゴール」を押した記録です。アプリの中からは消えません。応援画面を使っているときは、Googleのスプレッドシート「KOBEレースナビ見守りデータ」の「記録」シートにも残ります。</p>
+    ${all.length ? all.map(one).join("") : `<p class="muted">まだ記録はありません（シミュレーションは記録に残りません）</p>`}
+    ${all.length ? `<button type="button" class="btn" data-copyrec>記録を文字でコピー</button>` : ""}</div>`;
+  document.body.appendChild(bg);
+  bg.addEventListener("click", e=>{
+    if(e.target === bg || e.target.closest("[data-close]")) return bg.remove();
+    if(e.target.closest("[data-copyrec]")){
+      const txt = all.map(r=>[`${r.date} ${r.mode}${r.goal ? " 完走" : ""} 記録${E.fmtDur(r.el)} スタート${r.start} ${r.goal ? "ゴール" : "終了"}${r.finish} ${Number(r.dist).toFixed(2)}km`].concat((r.splits||[]).map(x=>`  ${x.name}(${x.km}km) ${x.clock}通過 閉鎖${x.close}`)).join("\n")).join("\n\n");
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(()=>toast("コピーしました")).catch(()=>prompt("コピーしてください", txt));
+    }
+  });
+}
 function lastResult(){
   const r = load(LAST_KEY); if(!r || Date.now() - r.at > 3*86400000) return "";
   const t = new Date(r.at);
@@ -440,21 +533,21 @@ function updateRun(){
   $("dist").textContent = d.toFixed(2);
   $("el").textContent = E.fmtDur(s.elapsed);
   $("clock").textContent = E.fmtClockS(s.clock);
-  if(!R.sim) $("gps").textContent = gpsAcc == null ? "GPS待機中…" : `GPS ±${Math.round(gpsAcc)}m` + (T && T.s.offCourse ? "・コース外" : "");
+  if(!R.sim){ const rj = T && T.s.rej; $("gps").textContent = gpsAcc == null ? "GPS待機中…" : `GPS ±${Math.round(gpsAcc)}m` + (rj === "fast" ? "・速すぎる動きは距離に入れていません" : rj === "acc" ? "・精度が悪いので待っています" : "") + (T && T.s.offCourse ? "・コース外" : ""); }
   const g = E.nextGate(s);
   if(g){
     const left = g.close - s.clock, rem = g.km - d;
     const req = left > 0 ? (left - Math.min(120, left*0.08))/(rem*1.01+0.05) : null;
     const eta = R.plan ? s.clock + E.timeBetween(R.plan, d, g.km) : null, m = eta!=null ? g.close - eta : null;
     $("gate").innerHTML = `<div class="spread"><span class="gname">次の関門：${esc(g.name)}</span><span class="small muted num">${g.km.toFixed(1)}km・${E.fmtClock(g.close)}閉鎖</span></div>
-      <div class="grid"><div><span>あと</span><b>${rem<1 ? Math.round(rem*1000)+"m" : rem.toFixed(2)+"<small style='font-size:14px'>km</small>"}</b></div>
+      <div class="g3"><div><span>あと${rem<1 ? "" : "（km）"}</span><b>${rem<1 ? Math.max(0, Math.round(rem*1000))+"<small>m</small>" : rem.toFixed(2)}</b></div>
       <div><span>閉鎖まで</span><b class="${left<600?"bad":""} ${left>=3600?"long":""}">${left>0 ? E.fmtDur(left) : "閉鎖"}</b></div>
-      <div><span>必要ペース</span>${!req ? "<b>—</b>" : req >= 720 ? `<b class="word">歩いてOK</b>` : `<b>${E.fmtPace(req)}</b>`}</div>
-      <div><span>目標で余裕</span><b class="${m!=null && m<(g.margin ?? 600) ? "bad" : "good"}">${m==null ? "—" : m>=0 ? Math.floor(m/60)+"分" : "なし"}</b></div></div>`;
+      <div><span>必要ペース</span>${!req ? "<b>—</b>" : `<b class="${req >= 3600 ? "long" : ""}">${req >= 3600 ? "60:00+" : E.fmtPace(req)}</b>${req >= 720 ? `<em class="okw">歩いてOK</em>` : ""}`}</div></div>
+      <div class="marg">目標ペースなら 余裕 <b class="${m!=null && m<(g.margin ?? 600) ? "bad" : "good"}">${m==null ? "—" : m>=0 ? Math.floor(m/60)+"分" : "なし"}</b><span class="muted">（目標 ${Math.round((g.margin ?? 600)/60)}分以上）</span></div>`;
   } else {
     const rem = s.finishKm - d;
     const fl = s.finishClose - s.clock;
-    $("gate").innerHTML = `<div class="spread"><span class="gname">${R.nearFinish || rem <= 0 ? "ゴール予定地点付近" : "フィニッシュまで"}</span><span class="small muted">制限 ${esc(S.finishClose)}</span></div><div class="grid"><div><span>あと</span><b>${rem <= 0 ? "0m" : rem < 1 ? Math.round(rem*1000)+"m" : rem.toFixed(2)}</b></div><div><span>制限まで</span><b class="${fl >= 3600 ? "long" : ""}">${fl > 0 ? E.fmtDur(fl) : "—"}</b></div></div>`;
+    $("gate").innerHTML = `<div class="spread"><span class="gname">${R.nearFinish || rem <= 0 ? "ゴール予定地点付近" : "フィニッシュまで"}</span><span class="small muted">制限 ${esc(S.finishClose)}</span></div><div class="g3 two"><div><span>あと${rem < 1 ? "" : "（km）"}</span><b>${rem <= 0 ? "0<small>m</small>" : rem < 1 ? Math.round(rem*1000)+"<small>m</small>" : rem.toFixed(2)}</b></div><div><span>制限まで</span><b class="${fl >= 3600 ? "long" : ""}">${fl > 0 ? E.fmtDur(fl) : "—"}</b></div></div>`;
   }
   // 残り1kmを切ったら（またはフィニッシュ地点の近く）、終了ボタンの代わりにゴールボタンを大きく出す
   const showGoal = d >= s.finishKm - 1 || !!R.nearFinish;
@@ -562,6 +655,10 @@ function openSettings(){
       <label class="chk"><input type="checkbox" name="ssim" ${S.sync.simShare?"checked":""}> シミュレーション中も応援画面に送る（テスト用）</label>
       <div class="row"><button type="button" class="btn" data-act="synctest">接続テスト</button><button type="button" class="btn" data-act="watchlink">応援用リンクをコピー</button></div>
     </section>
+    <section class="card"><h3>不具合の報告用</h3>
+      <p class="small muted">GPSの受け取り、距離の補正、送信の失敗、読み上げ、処理の遅れを記録しています。うまく動かなかったときに、これをコピーして送ってください。</p>
+      <div class="row"><button type="button" class="btn" data-act="diag">診断ログを見る</button></div>
+    </section>
     <section class="card"><h3>開発用</h3>
       <label class="chk"><input type="checkbox" name="sim" ${S.sim?"checked":""}> シミュレーションのボタンを表示する</label>
     </section>
@@ -577,6 +674,7 @@ function openSettings(){
     if(add === "gate") f.querySelector("#gates").insertAdjacentHTML("beforeend", gateRow({name:"",km:"",time:""}));
     const del = e.target.closest("[data-del]"); if(del) del.parentElement.remove();
     const act = e.target.closest("[data-act]")?.dataset.act;
+    if(act === "diag"){ openDiag(); return; }
     if(act === "resetkobe"){ f.querySelector("#segs").innerHTML = KOBE_SEGS.map(segRow).join(""); f.querySelector("#gates").innerHTML = KOBE_GATES.map(gateRow).join(""); f.gun.value = "09:00"; f.finishClose.value = "16:00"; f.margin.value = 10; f.fastest.value = "7:00"; }
     if(act === "synctest" || act === "watchlink"){
       const url = f.surl.value.trim(), key = f.skey.value.trim();
@@ -606,6 +704,21 @@ function openSettings(){
   });
 }
 
+function openDiag(){
+  Diag.save();
+  const bg = document.createElement("div"); bg.className = "sheet-bg"; bg.style.zIndex = 60;
+  const text = Diag.lines.slice().reverse().join("\n") || "（まだ記録がありません）";
+  bg.innerHTML = `<div class="sheet"><div class="spread"><h2>診断ログ</h2><button type="button" class="btn ghost" data-close>閉じる</button></div>
+    <p class="small muted">新しい順。コピーしてLINEなどで送ってください。</p>
+    <textarea class="inp" readonly rows="16" style="font-size:12px;font-family:monospace">${esc(text)}</textarea>
+    <div class="row"><button type="button" class="btn primary" data-copy>コピー</button><button type="button" class="btn ghost" data-clear>消す</button></div></div>`;
+  document.body.appendChild(bg);
+  bg.addEventListener("click", e=>{
+    if(e.target === bg || e.target.closest("[data-close]")) return bg.remove();
+    if(e.target.closest("[data-copy]")){ const ta = bg.querySelector("textarea"); (navigator.clipboard ? navigator.clipboard.writeText(ta.value) : Promise.reject()).then(()=>toast("コピーしました")).catch(()=>{ ta.select(); try{ document.execCommand("copy"); toast("コピーしました"); }catch(_){ toast("長押しで選んでコピーしてください"); } }); }
+    if(e.target.closest("[data-clear]")){ if(confirm("診断ログを消しますか？")){ Diag.lines = []; Diag.save(); bg.remove(); } }
+  });
+}
 function openFix(){
   const v = prompt("今の正しい距離（km）を入れてください。km表示の看板を通過したときに使います。", (T ? T.dist : 0).toFixed(2));
   if(v == null) return;
@@ -638,6 +751,8 @@ document.addEventListener("click", e=>{
   if(b.dataset.cross){ S.practiceCross = b.dataset.cross; saveS(); render(); return; }
   const a = b.dataset.act;
   if(a === "start") startRun();
+  if(a === "resume") resumeRun();
+  if(a === "records") openRecords();
   if(a === "press") onPress("gate", "screen");
   if(a === "status") onPress("status", "screen");
   if(a === "settings") openSettings();
@@ -658,14 +773,14 @@ document.addEventListener("click", e=>{
     setTimeout(()=>{ finishArmed = false; const fb = $("finbtn"); if(fb) fb.textContent = "終了"; }, 4000);
   }
 });
-document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && R){ keepAwake(); updateRun(); } if(document.hidden) persist(true); });
+document.addEventListener("visibilitychange", ()=>{ if(R) Diag.log(document.hidden ? "画面OFF・裏へ" : "画面ON"); if(document.hidden) Diag.save(); if(!document.hidden && R){ keepAwake(); updateRun(); } if(document.hidden) persist(true); });
 setInterval(()=>{ if(R && !document.hidden) updateRun(); }, 1000);
 
 window.App = {
   boot(){
     if(location.hash.startsWith("#watch") && !Native){ location.replace("watch.html" + location.hash); return; }   // 以前の応援用リンク
     // 12時間以上前に始めた計測（練習で「終了」を押し忘れたものなど）は、終わったことにする。本番の日に古い計測が続かないように
-    if(R && !R.sim && Date.now() - (R.startWall || 0) > 12*3600000){ R = null; persist(true); setTimeout(()=>toast("前回の計測（終了を押し忘れたもの）を終わりにしました"), 500); }
+    if(R && !R.sim && Date.now() - (R.startWall || 0) > 12*3600000){ try{ makeTracker(); const el = (R.lastFixEl || 0); saveRecord({id:R.startWall, at:Date.now(), mode:R.raceDay ? "本番" : "練習", goal:false, date:(d=>d.getFullYear()+"-"+E.pad(d.getMonth()+1)+"-"+E.pad(d.getDate()))(new Date(R.startWall)), start:E.fmtClockS(R.startClock), finish:E.fmtClockS(R.startClock + el), el:Math.round(el), dist:+(T ? T.dist : 0).toFixed(3), splits:R.splits || [], laps:R.laps.map(l=>[l.km, Math.round(l.sec), l.partial ? 1 : 0]), note:"終了の押し忘れ"}); }catch(e){} T = null; R = null; persist(true); setTimeout(()=>toast("前回の計測（終了を押し忘れたもの）を終わりにしました"), 500); }
     if(R){ if(R.sim){ R = null; persist(true); } else { makeTracker(); startGps(); keysEnable(); view = "run"; } }   // シミュレーションは再読み込みで終わり
     render();
     if("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(()=>{});

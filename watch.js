@@ -11,8 +11,18 @@ window.Watch = (()=>{
   const KEY = "kobe-watch-v1";
   let conf = (()=>{ try{ return JSON.parse(localStorage.getItem(KEY) || "null"); }catch(e){ return null; } })() || {url:"", key:"", from:""};
   // リンク（#watch&u=…&k=…）で開いたとき
-  const hp = new URLSearchParams(location.hash.replace(/^#(watch&?)?/, ""));
-  if(hp.get("u") && hp.get("k")){ conf.url = hp.get("u"); conf.key = hp.get("k"); save(); history.replaceState(null, "", location.pathname); }
+  // リンクの # のあと（または ? のあと：アプリによっては # 以降が消えるため）から読む
+  function fromLink(str){
+    str = String(str || "");
+    for(const part of [str.split("#")[1], str.split("?")[1]]){
+      if(!part) continue;
+      const q = new URLSearchParams(part.replace(/^(watch&?)/, "").split("#")[0]);
+      if(q.get("u") && q.get("k")) return {url:q.get("u"), key:q.get("k")};
+    }
+    return null;
+  }
+  const hp = fromLink(location.href);
+  if(hp){ conf.url = hp.url; conf.key = hp.key; save(); history.replaceState(null, "", location.pathname); }
   function save(){ try{ localStorage.setItem(KEY, JSON.stringify(conf)); }catch(e){} }
   const cfgOk = () => !!(conf.url && conf.key);
   async function post(body){
@@ -31,7 +41,7 @@ window.Watch = (()=>{
     app.innerHTML = `<div class="wrap">
       <div class="hdr"><div class="brand">KOBE <span>応援</span></div></div>
       ${cfgOk() ? "" : `<div class="card"><b>共有の設定</b>
-        <label class="field">ウェブアプリのURL<input class="inp" id="wurl" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="field">応援用リンク（まるごと貼り付け）または ウェブアプリのURL<input class="inp" id="wurl" placeholder="https://…"></label>
         <label class="field">合言葉<input class="inp" id="wkey"></label>
         <button class="btn primary" data-w="conn">接続する</button>
         <p class="small muted">ランナーから送られた「応援用リンク」を開くと、自動で入ります。</p></div>`}
@@ -119,12 +129,12 @@ window.Watch = (()=>{
         </div>
       </div>
       ${g ? `<div class="card gatecard"><div class="spread"><span class="gname">次の関門：${esc(g.name)}</span><span class="small muted num">${g.km.toFixed(1)}km・${E.fmtClock(g.close)}閉鎖</span></div>
-        <div class="grid"><div><span>あと</span><b>${g.rem<1 ? Math.round(g.rem*1000)+"m" : g.rem.toFixed(2)}</b></div>
+        <div class="g3"><div><span>あと${g.rem<1 ? "" : "（km）"}</span><b>${g.rem<1 ? Math.max(0, Math.round(g.rem*1000))+"<small>m</small>" : g.rem.toFixed(2)}</b></div>
         <div><span>閉鎖まで</span>${(()=>{ const l = g.left - (lv.state==="running" ? (Date.now()-lv.at)/1000 : 0); return `<b class="${l>=3600?"long":""}">${l>0 ? E.fmtDur(l) : "閉鎖"}</b>`; })()}</div>
-        <div><span>必要ペース</span>${g.req && g.req >= 720 ? `<b class="word">歩いてOK</b>` : `<b>${E.fmtPace(g.req)}</b>`}</div>
-        <div><span>目標で余裕</span><b class="${g.margin!=null && g.margin<(g.need ?? 600) ? "bad" : "good"}">${g.margin==null ? "—" : g.margin>=0 ? Math.floor(g.margin/60)+"分" : "なし"}</b></div></div></div>`
+        <div><span>必要ペース</span><b class="${g.req && g.req >= 3600 ? "long" : ""}">${g.req && g.req >= 3600 ? "60:00+" : E.fmtPace(g.req)}</b>${g.req && g.req >= 720 ? `<em class="okw">歩いてOK</em>` : ""}</div></div>
+        <div class="marg">目標ペースなら 余裕 <b class="${g.margin!=null && g.margin<(g.need ?? 600) ? "bad" : "good"}">${g.margin==null ? "—" : g.margin>=0 ? Math.floor(g.margin/60)+"分" : "なし"}</b><span class="muted">（目標 ${Math.round((g.need ?? 600)/60)}分以上）</span></div></div>`
       : lv.state === "running" ? (()=>{ const rem = Math.max(0, 42.195 - Number(lv.dist)); return `<div class="card gatecard"><div class="spread"><span class="gname">${lv.near || rem < 0.05 ? "ゴール予定地点付近" : "フィニッシュまで"}</span></div>
-        <div class="grid"><div><span>あと</span><b>${rem < 1 ? Math.round(rem*1000)+"m" : rem.toFixed(2)}</b></div></div></div>`; })() : ""}
+        <div class="g3 two"><div><span>あと${rem < 1 ? "" : "（km）"}</span><b>${rem < 1 ? Math.round(rem*1000)+"<small>m</small>" : rem.toFixed(2)}</b></div></div></div>`; })() : ""}
 `;
     updateMap(lv);
   }
@@ -263,7 +273,12 @@ window.Watch = (()=>{
     if(a === "refresh") poll();
     if(a === "center" && W.map && W.live){ const e = estimate(W.live); if(e.pos || W.live.pos) W.map.setView(e.pos || W.live.pos, Math.max(W.map.getZoom(), 15)); }
     if(a === "unspot"){ conf.spot = null; save(); if(W.map && W.layers.spot) W.map.removeLayer(W.layers.spot); moveEst(); }
-    if(a === "conn"){ conf.url = document.getElementById("wurl").value.trim(); conf.key = document.getElementById("wkey").value.trim(); save(); render(root); }
+    if(a === "conn"){
+      const u = document.getElementById("wurl").value.trim(), k = document.getElementById("wkey").value.trim(), l = fromLink(u);   // 応援用リンクをまるごと貼っても使える
+      if(l){ conf.url = l.url; conf.key = l.key; } else { conf.url = u; conf.key = k; }
+      if(!conf.url || !conf.key){ toast("応援用リンクを貼るか、URLと合言葉を入れてください"); return; }
+      save(); render(root);
+    }
     if(a === "quick") sendText(b.textContent);
     if(a === "send") sendText(document.getElementById("wtext").value);
     if(a === "rec") recToggle();

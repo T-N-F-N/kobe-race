@@ -172,7 +172,8 @@ E.Tracker = class {
   //   位置の差だけだと、GPSの細かいぶれが積み上がって長めに出る（特にゆっくり走る・歩くとき）
   fix(f){
     const s = this.s, o = this.opt, ev = [], p = [f.lat, f.lon];
-    if(f.acc != null && f.acc > 60) return ev;
+    s.rej = null;
+    if(f.acc != null && f.acc > 60){ s.rej = "acc"; return ev; }
     const sp = f.speed != null && isFinite(f.speed) && f.speed >= 0 && f.speed < 9 ? (f.speed < 0.5 ? 0 : f.speed) : null;
     let gap = false;
     if(s.last){
@@ -182,14 +183,14 @@ E.Tracker = class {
       if(sp != null && s.last.sp != null && dt <= 10){
         s.accum += (sp + s.last.sp)/2 * dt / 1000;                       // 速度×時間
       } else {
-        if(dt < 30 && d/dt > 8.5) return ev;                            // 時速30km超の飛び
+        if(dt < 30 && d/dt > 8.5){ s.rej = "fast"; return ev; }        // 時速30km超の飛び
         gap = dt >= 30 || d > 250;
         // 止まっているか：12〜15秒前の位置から、ほとんど動いていなければ止まっているとみなす（ぶれを距離にしない）
         const w = s.win || (s.win = []);
         w.push([f.t, p]); while(w.length > 1 && f.t - w[0][0] > 15000) w.shift();
         const moved = !gap && w.length > 1 && f.t - w[0][0] >= 12000 ? E.hav(w[0][1], p) : Infinity;
-        if(moved < Math.max(8, (f.acc || 10)*0.5)){ s.last = {p, t:f.t, sp}; return ev; }   // 歩いても12秒で15m以上は動く
-        if(dt < 30 && d < Math.max(20, (f.acc||10)*1.5)) return ev;    // 20m以上離れた点どうしで測る（細かいぶれを足さない）
+        if(moved < Math.max(8, (f.acc || 10)*0.5)){ s.last = {p, t:f.t, sp}; s.rej = "still"; return ev; }   // 歩いても12秒で15m以上は動く
+        if(dt < 30 && d < Math.max(20, (f.acc||10)*1.5)){ s.rej = "near"; return ev; }    // 20m以上離れた点どうしで測る（細かいぶれを足さない）
         if(!gap) s.accum += d/1000;
       }
     }
