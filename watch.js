@@ -34,6 +34,7 @@ window.Watch = (()=>{
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const toast = t => { const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(()=>d.remove(), 2600); };
   const course = () => window.KOBE_COURSE || null;
+  const fmtKm = d => (Number(d) || 0) >= 42.195 - 1e-6 ? "42.195" : (Number(d) || 0).toFixed(2);
   let root = null;
 
   function render(app){
@@ -90,13 +91,13 @@ window.Watch = (()=>{
     const a = lv.app || {}, bat = a.battery != null ? `・電池${a.battery}%${a.charging ? "（充電中）" : ""}` : "";
     const ago = age < 90 ? `${age}秒前` : `${Math.floor(age/60)}分${age%60}秒前`;
     if(lv.state === "finished" && lv.goal) return {lv:"done", c:"#5fd18f", t:"🏁 ゴールしました！", d:`${hm}にゴール・記録 ${E.fmtDur(lv.el)}`};
-    if(lv.state === "finished") return {lv:"done", c:"#9fb0c4", t:"⚪ 計測は終了しています", d:`${hm}に終了・${Number(lv.dist).toFixed(2)}km・${E.fmtDur(lv.el)}`};
+    if(lv.state === "finished") return {lv:"done", c:"#9fb0c4", t:"⚪ 計測は終了しています", d:`${hm}に終了・${fmtKm(lv.dist)}km・${E.fmtDur(lv.el)}`};
     if(age <= 75){
       if(a.gpsAge != null && a.gpsAge > 90) return {lv:"nogps", c:"#f5b83d", t:"🟡 アプリは動いていますが、GPSが取れていません", d:`GPSを${Math.floor(a.gpsAge/60)}分受け取れていません（高架下・ビルの間など）。${ago}に受信${bat}`};
       return {lv:"ok", c:"#5fd18f", t:"🟢 アプリは正常に動いています", d:`${ago}に受信${lv.acc ? `・GPS ±${lv.acc}m` : ""}${bat}`};
     }
     if(age <= 180) return {lv:"late", c:"#ff9f43", t:"🟠 受信が遅れています", d:`最後の受信は${ago}。電波が弱い場所にいる可能性があります${bat}`};
-    return {lv:"lost", c:"#ff5a4c", t:`🔴 ${Math.floor(age/60)}分間、受信がありません`, d:`アプリが止まっているか、電波がありません。最後の受信 ${hm}・${Number(lv.dist).toFixed(2)}km${bat}。地図の黄色の丸（今ごろの位置）は、あてにしないでください`};
+    return {lv:"lost", c:"#ff5a4c", t:`🔴 ${Math.floor(age/60)}分間、受信がありません`, d:`アプリが止まっているか、電波がありません。最後の受信 ${hm}・${fmtKm(lv.dist)}km${bat}。地図の黄色の丸（今ごろの位置）は、あてにしないでください`};
   }
   function paintState(){
     const el = document.getElementById("wstate"), el2 = document.getElementById("wstate2"), card = document.getElementById("wstatecard"); if(!el) return;
@@ -116,7 +117,7 @@ window.Watch = (()=>{
     body.innerHTML = `
       <div class="card">
         <div class="spread"><b>${esc(lv.name || "ランナー")}</b><span class="small muted">スタート ${E.fmtClockS(lv.startClock)}</span></div>
-        <div class="big"><div class="d num"><span>${Number(lv.dist).toFixed(2)}</span><small>km</small></div><div class="t"><b class="num">${E.fmtDur(liveEl(lv))}</b><span>スタートから</span></div></div>
+        <div class="big"><div class="d num"><span>${fmtKm(lv.dist)}</span><small>km</small></div><div class="t"><b class="num">${E.fmtDur(liveEl(lv))}</b><span>スタートから</span></div></div>
         <div class="tiles">
           <div><span>目標ペース</span><b>${E.fmtPace(lv.target)}</b></div>
           <div><span>現在ペース</span><b>${E.fmtPace(lv.cur)}</b></div>
@@ -191,8 +192,8 @@ window.Watch = (()=>{
     // コースの外（練習など）では、コース上の推定は出さない（白い丸が実際の位置）
     if(e.pos && !e.off){ W.layers.est.setLatLng(e.pos).setStyle({fillColor: lost ? "#9fb0c4" : "#f5b83d"}); if(!W.map.hasLayer(W.layers.est)) W.layers.est.addTo(W.map); }
     else if(W.map.hasLayer(W.layers.est)) W.map.removeLayer(W.layers.est);
-    let t = lv.state !== "running" ? `最後の位置：${Number(lv.dist).toFixed(2)}km` :
-      e.off ? `コースの外にいます（練習など）。計測の距離は <b>${Number(lv.dist).toFixed(2)}km</b>。地図の白い丸が実際の位置です` :
+    let t = lv.state !== "running" ? `最後の位置：${fmtKm(lv.dist)}km` :
+      e.off ? `コースの外にいます（練習など）。計測の距離は <b>${fmtKm(lv.dist)}km</b>。地図の白い丸が実際の位置です` :
       lv.near ? `<b>ゴール予定地点付近</b>にいます` :
       `今ごろ <b>${e.km.toFixed(2)}km</b> あたり（最後に位置が取れた ${e.base.toFixed(2)}km 地点から${Math.round(e.age)}秒、${e.pace ? "キロ" + E.fmtPace(e.pace) : "ペース不明"}で計算）` + (e.age > 900 ? "。15分以上位置が取れていないので、ここで止めています" : lost ? "。<b style='color:#ff5a4c'>受信が途切れているので、あてにしないでください</b>" : "");
     if(conf.spot && !e.off){
