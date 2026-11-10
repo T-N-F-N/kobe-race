@@ -128,7 +128,7 @@ window.Watch = (()=>{
           <div><span>今のペースなら</span><b>${E.fmtClock(lv.predRecent)}</b></div>
         </div>
       </div>
-      ${g ? `<div class="card gatecard"><div class="spread"><span class="gname">次の関門：${esc(g.name)}</span><span class="small muted num">${g.km.toFixed(1)}km・${E.fmtClock(g.close)}閉鎖</span></div>
+      ${g && lv.state === "running" ? `<div class="card gatecard"><div class="spread"><span class="gname">次の関門：${esc(g.name)}</span><span class="small muted num">${g.km.toFixed(1)}km・${E.fmtClock(g.close)}閉鎖</span></div>
         <div class="g3"><div><span>あと${g.rem<1 ? "" : "（km）"}</span><b>${g.rem<1 ? Math.max(0, Math.round(g.rem*1000))+"<small>m</small>" : g.rem.toFixed(2)}</b></div>
         <div><span>閉鎖まで</span>${(()=>{ const l = g.left - (lv.state==="running" ? (Date.now()-lv.at)/1000 : 0); return `<b class="${l>=3600?"long":""}">${l>0 ? E.fmtDur(l) : "閉鎖"}</b>`; })()}</div>
         <div><span>必要ペース</span><b class="${g.req && g.req >= 3600 ? "long" : ""}">${g.req && g.req >= 3600 ? "60:00+" : E.fmtPace(g.req)}</b>${g.req && g.req >= 720 ? `<em class="okw">歩いてOK</em>` : ""}</div></div>
@@ -219,9 +219,9 @@ window.Watch = (()=>{
   function paintMsgs(){
     const box = document.getElementById("wmsgs"); if(!box) return;
     // 今の計測（スタート以降）に送ったメッセージだけを出す
-    const lv = W.live, since = lv ? lv.at - (Number(lv.el) || 0)*1000 - 60000 : 0;
+    const lv = W.live, since = lv ? lv.at - (Number(lv.el) || 0)*1000 - 3*3600000 : 0;   // スタートの3時間前から
     const list = W.msgs.filter(m=>!(m.at < since));
-    box.innerHTML = list.length ? `<p class="small muted" style="margin-top:6px">この計測で送ったメッセージ</p>` + list.slice().reverse().slice(0,12).map(m=>{ const t = new Date(m.at);
+    box.innerHTML = list.length ? `<p class="small muted" style="margin-top:6px">送ったメッセージ</p>` + list.slice().reverse().slice(0,12).map(m=>{ const t = new Date(m.at);
       return `<div class="spread small" style="border-top:1px solid var(--line);padding:4px 0"><span>${t.getHours()}:${E.pad(t.getMinutes())} ${m.voice ? "🎤 声のメッセージ" : esc(m.text)}</span><b class="${m.deliveredAt?"good":"muted"}">${m.deliveredAt ? "届いた" : "未達"}</b></div>`; }).join("") : "";
   }
   async function sendText(text){

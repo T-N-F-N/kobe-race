@@ -191,7 +191,7 @@ E.Tracker = class {
         const moved = !gap && w.length > 1 && f.t - w[0][0] >= 12000 ? E.hav(w[0][1], p) : Infinity;
         if(moved < Math.max(8, (f.acc || 10)*0.5)){ s.last = {p, t:f.t, sp}; s.rej = "still"; return ev; }   // 歩いても12秒で15m以上は動く
         if(dt < 30 && d < Math.max(20, (f.acc||10)*1.5)){ s.rej = "near"; return ev; }    // 20m以上離れた点どうしで測る（細かいぶれを足さない）
-        if(!gap) s.accum += d/1000;
+        if(!gap) s.accum += d/1000 * 0.993;   // 位置の差は、ぶれの分だけ長めに出るので少し割り引く（速度が取れない機種だけ）
       }
     }
     s.fixes++;

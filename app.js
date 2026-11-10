@@ -179,7 +179,8 @@ function startRun(opt){
   else if(!sim && isRaceDay()) startClock = clockOfDay(t);        // 本番：実際の時刻
   else if(S.practiceCross === "now" && !sim) startClock = clockOfDay(t);   // 練習「本番と同じ」：押した時刻のまま
   else startClock = E.parseHM(S.practiceCross) || E.parseHM("09:20"); // 練習・シミュレーション：選んだ時刻とみなす
-  R = {sim, startT:t, startWall:Date.now(), startClock, tracker:null, laps:[], lastLapEl:0, nextKm:1, passed:[], track:[], lastLive:0, lastVoice:0, savedAt:0, plan:null, base:null, raceDay:!sim && isRaceDay()};
+  const lastEnd = (load(LAST_KEY) || {}).at || 0;
+  R = {sim, startT:t, startWall:Date.now(), msgFrom:Math.max(lastEnd, Date.now() - 3*3600000), startClock, tracker:null, laps:[], lastLapEl:0, nextKm:1, passed:[], track:[], lastLive:0, lastVoice:0, savedAt:0, plan:null, base:null, raceDay:!sim && isRaceDay()};
   makeTracker();
   R.plan = newPlan(); R.base = R.plan;
   const g = E.nextGate(st());
@@ -241,6 +242,8 @@ function onFix(f){
   gpsStatFlush();
   const d = T.dist;
   const jumped = evs.some(e=>e.type !== "anchor" || Math.abs(e.delta) > 0.05) || (accepted && R.lastFixEl != null && el - R.lastFixEl > 30);
+  // 関門地点で距離を補正した・電波が途切れたkmのラップは、補正の分だけ速く／遅く見えるので比べない
+  if(evs.some(e=>e.type !== "anchor" || Math.abs(e.delta) > 0.02) || (accepted && R.lastFixEl != null && el - R.lastFixEl > 30)) R.corrInLap = true;
   const tr = R.track[R.track.length-1];
   if(!tr || E.hav(tr, [f.lat, f.lon]) >= 30){ R.track.push([+f.lat.toFixed(5), +f.lon.toFixed(5)]); if(R.track.length > 800) R.track.splice(0, R.track.length-800); }
   R.lastPos = [+f.lat.toFixed(5), +f.lon.toFixed(5)];
@@ -253,8 +256,9 @@ function onFix(f){
     const k = R.nextKm;
     const tc = d > prev && prev < k && R.lastFixEl != null ? R.lastFixEl + (k-prev)/(d-prev)*(el-R.lastFixEl) : el;
     const target = E.paceAt(R.plan, k - 0.5) || 0;
-    kmLap = {km:k, sec:tc - R.lastLapEl, target, t:tc, partial:k === R.partialKm};
+    kmLap = {km:k, sec:tc - R.lastLapEl, target, t:tc, partial:k === R.partialKm || !!R.corrInLap};
     R.laps.push(kmLap); R.lastLapEl = tc; R.nextKm++;
+    R.corrInLap = false;
   }
   // 1回の位置で2km以上進んだ・電波切れや補正のあとのラップは、正確でないのでラップの比較を読まない
   if(R.laps.length - lapsBefore > 1 || (kmLap && jumped)) R.laps.slice(lapsBefore).forEach(l=>{ l.partial = true; });
@@ -376,8 +380,8 @@ const Live = {
     try{
       const j = await withTimeout(Sync.post({live:this.snapshot(false)}), 25000);   // 電波が悪くて返事が来なくても、次の送信を止めない
       const seen = this.acked(), fresh = (j.msgs || []).filter(m=>!seen.has(m.id));
-      // 計測を始める前に送られたメッセージ（前回のテストの残りなど）は読まずに「届いた」にする
-      if(fresh.length){ this.ack(fresh.map(m=>m.id)); Sync.post({ack:fresh.map(m=>m.id)}).catch(()=>{}); fresh.filter(m=>!(m.at < (R.startWall || 0) - 60000)).forEach(m=>this.queue.push(m)); this.drain(); }
+      // 前の計測（テストなど）の残りのメッセージは読まずに「届いた」にする。スタート前3時間以内に送られた応援は読む
+      if(fresh.length){ this.ack(fresh.map(m=>m.id)); Sync.post({ack:fresh.map(m=>m.id)}).catch(()=>{}); fresh.filter(m=>!(m.at < (R.msgFrom || (R.startWall || 0) - 60000))).forEach(m=>this.queue.push(m)); this.drain(); }
       setNet("");
       if(this.failN) Diag.log(`送信が回復（${this.failN}回失敗のあと）`); this.failN = 0;
     }catch(e){ setNet("共有：通信できません"); this.failN = (this.failN || 0) + 1; if(this.failN <= 3 || this.failN % 10 === 0) Diag.log(`送信失敗${this.failN}回目: ${e && e.message || e}`); }
@@ -741,6 +745,7 @@ function openStartFix(){
   R.startClock = c; R.startT = nowMs() - (nowClock - c)*1000;
   ["lastLapEl","lastFixEl","lastVoice"].forEach(k=>{ if(R[k] != null) R[k] += shift; });
   R.laps.forEach(l=>{ l.t += shift; });
+  (R.splits || []).forEach(x=>{ x.el = Math.round(x.el + shift); });   // 通過した時刻（clock）はそのまま、経過時間だけ変わる
   R.partialKm = R.nextKm;
   R.plan = newPlan(); R.base = E.makePlan(cfg(), 0, c); persist(true); toast("スタート時刻を直しました"); render();
 }
