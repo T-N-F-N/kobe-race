@@ -129,3 +129,56 @@ table.laps th{color:var(--muted);font-size:12px}
 .gatecard .marg{font-size:14px;font-weight:700}
 .gatecard .marg b{font-family:var(--f-num);font-size:20px;margin:0 2px}
 .gatecard .marg span{font-size:12px;margin-left:4px}
+
+/* ===== 完走証 ===== */
+.cert-bg{position:fixed;inset:0;z-index:80;background:#050b18;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:12px;padding:calc(14px + env(safe-area-inset-top)) 12px calc(16px + env(safe-area-inset-bottom))}
+.cert{position:relative;flex:0 0 auto;width:100%;min-width:0;max-width:440px;background:linear-gradient(160deg,#0f2a52 0%,#0a1f3a 45%,#07152b 100%);border-radius:10px;padding:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);color:#fff;overflow:hidden}
+.cert::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 18%,rgba(245,184,61,.22),transparent 55%);pointer-events:none}
+.cert-in{position:relative;border:2px solid #d9a93a;outline:1px solid rgba(217,169,58,.55);outline-offset:-7px;border-radius:6px;padding:16px 14px 12px;text-align:center;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;justify-items:center;min-width:0}
+.cert-in>*{max-width:100%}
+.cert-en,.cert-title,.cert-event,.cert-eventen,.cert-name,.cert-time b,.cert-stats b,.cert-date{white-space:nowrap}
+.cert-en{display:inline-block;max-width:none;font-family:var(--f-num);letter-spacing:.32em;font-size:12px;color:#e7c66d;padding-left:.32em}
+.cert-wreath{position:relative;width:210px;max-width:100%;aspect-ratio:240/130;display:grid;place-items:center}
+.cert-wreath .laurel{position:absolute;inset:0;width:100%;height:100%}
+.cert-title{position:relative;display:inline-block;margin-top:-6px;font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;font-weight:900;font-size:35px;line-height:1.1;letter-spacing:.1em;padding-left:.1em;background:linear-gradient(180deg,#fff6cf,#e7b84a 55%,#b9852a);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 2px 3px rgba(0,0,0,.75))}
+.cert-event{display:inline-flex;align-items:baseline;justify-content:center;gap:.27em;line-height:1;margin-top:2px;font-size:30px;max-width:none}
+.cert-kobe{font-weight:900;font-size:1em;letter-spacing:.04em;font-style:italic;transform:skewX(-6deg);text-shadow:0 2px 0 #e2232c}
+.cert-year{font-family:var(--f-num);font-weight:700;font-size:1.47em;font-style:italic;color:#f5b83d;letter-spacing:.02em;text-shadow:0 2px 0 rgba(0,0,0,.4)}
+.cert-eventen{display:inline-block;max-width:none;font-family:var(--f-num);font-weight:700;letter-spacing:.3em;padding-left:.3em;font-size:13px;color:#9fb6d8;border-top:1px solid rgba(217,169,58,.6);border-bottom:1px solid rgba(217,169,58,.6);padding-block:3px}
+.cert-name{display:inline-block;max-width:none;font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;font-weight:900;font-size:34px;margin-top:4px;border-bottom:1px solid rgba(255,255,255,.5);padding:0 .4em 4px;letter-spacing:.06em}
+.cert-name small{font-size:.56em;font-weight:700}
+.cert-text{font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;font-size:14.5px;line-height:1.6;color:#e8eefa;margin:2px 0 0;display:grid;justify-items:center;width:100%}
+.cert-rec{display:inline-flex;align-items:center;justify-content:center;gap:.24em;font-size:54px;white-space:nowrap;max-width:none;margin-top:2px}
+.cert-kanso{flex:0 0 auto;font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;font-weight:900;font-size:.36em;color:#fff;background:#c81e2b;border:2px solid #fff;border-radius:50%;width:3.1em;height:3.1em;display:grid;place-items:center;transform:rotate(-8deg);box-shadow:0 0 0 3px #c81e2b;letter-spacing:.06em;padding-left:.06em}
+.cert-time{display:grid;gap:1px;justify-items:center}
+.cert-time span{font-size:12px;color:#cfd8e6;font-weight:700}
+.cert-time b{font-family:var(--f-num);font-weight:700;font-size:1em;line-height:1;color:#ffe9a8;letter-spacing:.01em}
+.cert-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%;margin-top:4px}
+.cert-stats div{background:rgba(255,255,255,.07);border-radius:8px;padding:6px 2px;min-width:0}
+.cert-stats div{display:grid;justify-items:center}
+.cert-stats span{display:inline-block;white-space:nowrap;font-size:11px;color:#b9c6da;font-weight:700}
+.cert-stats b{display:inline-block;font-family:var(--f-num);font-size:24px;line-height:1.1}
+.cert-stats b small{font-size:.54em}
+.cert-date{display:inline-block;max-width:none;font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;font-size:17px;font-weight:700;margin-top:2px}
+.cert-text span{display:inline-block;white-space:nowrap}
+.cert-foot{font-size:10.5px;color:#8fa2bf}
+.cert-sample{position:absolute;top:44%;left:-10%;right:-10%;text-align:center;font-size:90px;font-weight:900;color:rgba(255,255,255,.13);transform:rotate(-24deg);pointer-events:none;z-index:2;letter-spacing:.2em}
+.cert-btns{display:flex;flex:0 0 auto;gap:8px;width:100%;max-width:440px}
+.cert-btns .btn{flex:1}
+/* ===== 記録の画面 ===== */
+.goalcard{border:2px solid var(--gold)}
+.resum{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1.15fr) minmax(0,1fr);gap:6px}
+.resum div{background:rgba(255,255,255,.06);border-radius:10px;padding:6px 6px;min-width:0;overflow:hidden}
+.resum span{display:block;font-size:11.5px;color:var(--muted);font-weight:700;white-space:nowrap}
+.resum b{display:inline-block;font-family:var(--f-num);font-size:28px;line-height:1.1;white-space:nowrap}
+.resum b small{font-size:.46em;margin-left:1px}
+.lapchart{display:grid;gap:3px}
+.laprow{display:grid;grid-template-columns:26px minmax(0,1fr) 46px 40px;gap:6px;align-items:center;font-size:14px}
+.laprow .lk{text-align:right;color:var(--muted);font-size:13px}
+.laprow .lb{height:14px;background:rgba(255,255,255,.06);border-radius:7px;overflow:hidden}
+.laprow .lb i{display:block;height:100%;border-radius:7px}
+.laprow .lb i.f{background:#3fb56c}.laprow .lb i.s{background:#ff6b5e}.laprow .lb i.p{background:#5d6b84}
+.laprow .lt{text-align:right;font-size:16px}
+.laprow .ld{text-align:right;font-size:13px}
+.inrow{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;align-items:center;border-top:1px solid var(--line);padding:8px 0}
+.inrow .btn{min-height:44px;padding:0}

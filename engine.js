@@ -137,7 +137,7 @@ E.pointAtKm = function(course, km){
   return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t];
 };
 // prefer：今いるはずの km。行きと帰りで同じ道を通る区間では、近い方を選ぶ（1kmずれると40m離れているのと同じ扱い）
-E.project = function(course, p, fromKm, toKm, prefer){
+E.project = function(course, p, fromKm, toKm, prefer, head){
   const pts = course.pts, k = Math.cos(p[0]*Math.PI/180)*111320;
   let best = null;
   const i0 = Math.max(0, idxAt(pts, fromKm)-1), i1 = Math.min(pts.length-1, idxAt(pts, toKm)+1);
@@ -145,6 +145,7 @@ E.project = function(course, p, fromKm, toKm, prefer){
     const a = pts[i], b = pts[i+1];
     const ax = (a[1]-p[1])*k, ay = (a[0]-p[0])*110540, bx = (b[1]-p[1])*k, by = (b[0]-p[0])*110540;
     const dx = bx-ax, dy = by-ay, L = dx*dx+dy*dy;
+    if(head && L && (dx*head[0] + dy*head[1]) / Math.sqrt(L) < 0.3) continue;   // 進む向きと合わない区間（折り返しの反対側など）
     const t = L ? Math.max(0, Math.min(1, -(ax*dx+ay*dy)/L)) : 0;
     const off = Math.hypot(ax+t*dx, ay+t*dy), km = a[2]+t*(b[2]-a[2]);
     const score = off + (prefer == null ? 0 : 40*Math.abs(km - prefer));
@@ -159,7 +160,9 @@ E.Tracker = class {
     this.anchors = (anchors||[]).map(a=>({...a}));
     // resync：コース線（近似）とGPSが1km以上食い違ったときだけ、コース線に合わせる（近似コースの誤差でGPSを狂わせないため）
     // maxSnap：関門地点での補正は300mまで（それ以上は関門の位置か GPS がおかしいので使わない）
-    this.opt = Object.assign({gpsFactor:0.99, snapR:50, maxSnap:0.3, offCourse:100, resync:1.0}, opt||{});
+    // over／under：コース線の上の位置と比べて、距離が45m以上進みすぎ・150m以上遅れの状態が8秒続いたら、コース線に合わせ直す
+    //   （GPSの速度に偏りがある機種でも、ずれが積み上がらないようにする安全装置）
+    this.opt = Object.assign({gpsFactor:0.99, snapR:50, maxSnap:0.3, offCourse:100, resync:1.0, over:0.045, under:0.15, courseBack:0.03}, opt||{});
     this.s = {dist:0, accum:0, baseKm:0, baseAcc:0, prog:null, last:null, passed:[], near:{}, recent:[], fixes:0, offCourse:false};
   }
   export(){ return JSON.parse(JSON.stringify(this.s)); }
@@ -175,6 +178,17 @@ E.Tracker = class {
     s.rej = null;
     if(f.acc != null && f.acc > 60){ s.rej = "acc"; return ev; }
     const sp = f.speed != null && isFinite(f.speed) && f.speed >= 0 && f.speed < 9 ? (f.speed < 0.5 ? 0 : f.speed) : null;
+    // 進む向き：20秒以内に12m以上動いた向き（止まっているときは「なし」）
+    const hb = s.hb || (s.hb = []);
+    hb.push([f.t, f.lat, f.lon]); while(hb.length > 1 && (f.t - hb[0][0] > 20000 || hb.length > 25)) hb.shift();
+    let head = null;
+    for(let i = hb.length-2; i >= 0; i--){
+      if(E.hav([hb[i][1], hb[i][2]], p) >= 12){
+        const hx = (p[1]-hb[i][2]) * Math.cos(p[0]*Math.PI/180)*111320, hy = (p[0]-hb[i][1])*110540, n = Math.hypot(hx, hy);
+        if(n > 0) head = [hx/n, hy/n];
+        break;
+      }
+    }
     let gap = false;
     if(s.last){
       const d = E.hav(s.last.p, p), dtRaw = (f.t - s.last.t)/1000;
@@ -211,8 +225,22 @@ E.Tracker = class {
       if(proj){ s.baseKm = Math.max(s.dist, proj.km); s.baseAcc = s.accum; }
       else if(s.last){ s.accum += E.hav(s.last.p, p)/1000; }
       est = s.baseKm + (s.accum - s.baseAcc) * o.gpsFactor;
-    } else if(proj && Math.abs(est - proj.km) > o.resync){
-      s.baseKm = proj.km; s.baseAcc = s.accum; est = proj.km; ev.push({type:"resync", km:proj.km, delta:proj.km - s.dist}); s.dist = Math.min(s.dist, est);   // コースから大きくずれたら、戻す方向にも直す
+    } else if(this.course && head && (f.acc == null || f.acc <= 30)){
+      // コース線との照合：進む向きが合う区間だけを、広め（手前600m〜先900m）に探す
+      const c2 = E.project(this.course, p, Math.max(0, est - 0.6), est + 0.9, est, head);
+      if(c2 && c2.off < 50){
+        // コースの終点に当てはまっているとき（フィニッシュを過ぎたあと）は「進みすぎ」と見ない（42.195kmから戻さない）
+        const atEnd = c2.km >= this.course.pts[this.course.pts.length-1][2] - 0.0005;
+        const diff = est - c2.km, sign = diff > o.over && !atEnd ? 1 : diff < -o.under ? -1 : 0;
+        if(sign && sign === s.cSign) s.cN++; else { s.cSign = sign; s.cN = sign ? 1 : 0; s.cT = f.t; }
+        if(sign && s.cN >= 8 && f.t - s.cT >= 8000){
+          const target = Math.max(0, c2.km - o.courseBack);   // 少しだけ手前（安全側）に合わせる
+          ev.push({type:"course", km:target, delta:target - est});
+          s.baseKm = target; s.baseAcc = s.accum; est = target;
+          if(sign > 0) s.dist = Math.min(s.dist, est);         // 進みすぎていたときは、戻す
+          s.cSign = 0; s.cN = 0;
+        }
+      }
     }
     let nd = Math.max(s.dist, est);
     // 関門など、場所がはっきりしている地点の通過で合わせ直す
@@ -268,7 +296,7 @@ E.gateText = function(st, g){
   s += `必要ペースは${E.spPace(req, true)}。`;
   if(st.plan){
     const tp = E.paceAt(st.plan, st.dist), eta = st.clock + E.timeBetween(st.plan, st.dist, g.km), m = g.close - eta;
-    s += `目標ペースは${E.spPace(tp)}` + (m >= 60 ? `、このペースなら余裕${E.spMin(m)}。` : m >= 0 ? "、閉鎖ぎりぎりです。" : "。");
+    s += `目標ペースは${E.spPace(tp)}` + (m >= 60 ? `、このペースなら余裕${E.spMin(m)}。` : m >= 0 ? "、閉鎖ぎりぎりです。" : "。目標ペースでは間に合いません。必要ペースを目安にしてください。");
   }
   return s;
 };
@@ -298,7 +326,16 @@ E.kmText = function(st, lap, change){
   let s = lap.partial ? `${lap.km}キロ。` : `${lap.km}キロ。ラップ${E.spPace(lap.sec).replace(/^キロ/, "")}、${E.diffWords(lap.sec - lap.target, "lap")}。`;
   if(st.base) s += E.diffWords(st.clock - E.etaAt(st.base, st.dist), "cum") + "。";
   const g = E.nextGate(st);
-  if(g && st.plan){ const m = g.close - (st.clock + E.timeBetween(st.plan, st.dist, g.km)); s += `次の関門まで${E.spDist(g.km - st.dist)}、` + (m >= 60 ? `余裕${E.spMin(m)}。` : "閉鎖ぎりぎりです。"); }
+  let short = false;   // 目標ペース（計画の最速）でも次の関門に届かない
+  if(g && st.plan){
+    const rem = g.km - st.dist, left = g.close - st.clock, m = left - E.timeBetween(st.plan, st.dist, g.km);
+    s += `次の関門まで${E.spDist(rem)}`;
+    if(m >= 60) s += `、余裕${E.spMin(m)}。`;
+    else if(m >= 0) s += "、閉鎖ぎりぎりです。";
+    else if(left > 0){ short = true; s += `、目標ペースでは間に合いません。必要ペースは${E.spPace((left - Math.min(120, left*0.08)) / (rem*1.01 + 0.05), true)}。`; }   // 必要なペースをそのまま伝える
+    else s += "。";
+  }
+  if(short) return s;
   if(change) s += change;
   else if(st.plan && st.dist < st.finishKm - 0.3) s += `次の1キロは${E.spPace(E.paceAt(st.plan, st.dist + 0.01))}。`;
   return s;

@@ -1,6 +1,6 @@
 // オフライン対応：まずネットから取り、つながらないときは保存しておいたものを使う
-const CACHE = "kobe-race-v3";
-const SHELL = ["./", "index.html", "app.js", "engine.js", "course.js", "watch.js", "mapdeco.js", "watch.html", "style.css", "sim.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
+const CACHE = "kobe-race-v8";
+const SHELL = ["./", "index.html", "app.js", "engine.js", "course.js", "watch.js", "mapdeco.js", "extras.js", "watch.html", "style.css", "sim.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e=>{ e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())); });
 self.addEventListener("activate", e=>{ e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())); });
 self.addEventListener("fetch", e=>{
