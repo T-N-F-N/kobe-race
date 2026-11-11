@@ -37,10 +37,19 @@ window.Watch = (()=>{
   const fmtKm = d => (Number(d) || 0) >= 42.195 - 1e-6 ? "42.195" : (Number(d) || 0).toFixed(2);
   let root = null;
 
+  // 名前：カタカナ→ひらがなに直す。ひらがな以外（漢字・英字など）があれば、送る前に確かめる
+  function fromOk(){
+    const el = document.getElementById("wfrom");
+    let v = ((el && el.value) || "").trim().replace(/[\u30a1-\u30f6]/g, c=>String.fromCharCode(c.charCodeAt(0) - 0x60));
+    if(el) el.value = v;
+    if(!v){ alert("あなたの名前を、ひらがなで入れてください。"); if(el) el.focus(); return false; }
+    if(/[^\u3041-\u309f\u30fc\s　・]/.test(v) && !confirm("名前に、ひらがな以外の文字が入っています。読み上げで読み間違えることがあります。\nこのまま送りますか？\n（「キャンセル」を押すと、名前を直せます）")){ if(el) el.focus(); return false; }
+    conf.from = v; save(); return true;
+  }
   function render(app){
     root = app;
     app.innerHTML = `<div class="wrap">
-      <div class="hdr"><div class="brand">KOBE <span>応援</span></div></div>
+      <div class="hdr"><div class="brand">神戸マラソン <span>応援</span></div></div>
       ${cfgOk() ? "" : `<div class="card"><b>共有の設定</b>
         <label class="field">応援用リンク（まるごと貼り付け）または ウェブアプリのURL<input class="inp" id="wurl" placeholder="https://…"></label>
         <label class="field">合言葉<input class="inp" id="wkey"></label>
@@ -53,13 +62,13 @@ window.Watch = (()=>{
         <div class="map" id="wmap"></div>
         <div id="west" class="small"></div>
         <p class="small muted">黄色の丸：今ごろいる場所の目安（最後に届いた位置から、今のペースでコースに沿って進めたもの）／白い丸：最後に届いたGPSの位置／青い線：通過した区間／青い丸：関門。地図のコースをタップすると、そこを「応援地点」にして、着くまでの目安を出します。</p>
-        <a id="wgmap" class="btn ghost" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" hidden>Googleマップで最後に届いた位置を開く</a>
+        <a id="wgmap" class="btn ghost" style="display:block;text-align:center;text-decoration:none;color:#fff;line-height:1.35" target="_blank" rel="noopener" hidden>Googleマップで開く<br><span style="font-size:12px;font-weight:700;color:#cfd8e6">（最後に届いた位置）</span></a>
       </div>
       <div class="card">
         <b>メッセージを送る</b>
-        <label class="field">あなたの名前（読み上げで「◯◯さんから」と言います）<input class="inp" id="wfrom" value="${esc(conf.from)}" placeholder="例：パパ"></label>
-        <div class="quick">${["いいペース！そのままいこう","少しペースを落とそう","次の給水は必ず取ろう","ジェルを補給しよう","腕を振ろう！","あと少し！がんばれ！"].map(t=>`<button class="btn" data-w="quick">${t}</button>`).join("")}</div>
-        <textarea class="inp" id="wtext" rows="2" placeholder="自由にメッセージを書く（短めがおすすめ）"></textarea>
+        <label class="field">あなたの名前（ひらがなで入力）<input class="inp" id="wfrom" value="${esc(conf.from)}" placeholder="例：たろう"></label>
+        <p class="small muted" style="margin:-4px 0 0">読み上げで「◯◯さんから」と言います。漢字だと読み間違えることがあるので、ひらがなで入れてください。</p>
+        <textarea class="inp" id="wtext" rows="3" placeholder="メッセージを書く（短めがおすすめ）"></textarea>
         <button class="btn primary" data-w="send">文字で送る（読み上げ）</button>
         <hr style="border:none;border-top:1px solid var(--line);width:100%">
         <b>声で送る（30秒まで）</b>
@@ -228,7 +237,7 @@ window.Watch = (()=>{
   async function sendText(text){
     text = String(text||"").trim(); if(!text) return;
     if(!cfgOk()){ toast("共有が設定されていません"); return; }
-    conf.from = (document.getElementById("wfrom")||{}).value || conf.from || ""; save();
+    if(!fromOk()) return;
     try{ await post({msg:{text, from:conf.from}}); toast("送信しました"); const ta = document.getElementById("wtext"); if(ta) ta.value = ""; poll(); }
     catch(e){ toast(e.message || "送信できませんでした"); }
   }
@@ -261,7 +270,7 @@ window.Watch = (()=>{
   async function sendVoice(){
     if(!W.blob) return;
     if(!cfgOk()){ toast("共有が設定されていません"); return; }
-    conf.from = (document.getElementById("wfrom")||{}).value || conf.from || ""; save();
+    if(!fromOk()) return;
     const b64 = await new Promise((ok, ng)=>{ const r = new FileReader(); r.onload = ()=>ok(String(r.result).split(",")[1] || ""); r.onerror = ng; r.readAsDataURL(W.blob); });
     try{ await post({voice:{data:b64, mime:W.mime, from:conf.from, sec:Math.round((Date.now()-W.recStart)/1000)}}); toast("声を送りました"); W.blob = null; document.getElementById("wprev").hidden = true; poll(); }
     catch(e){ toast(e.message || "送信できませんでした"); }
