@@ -88,10 +88,18 @@ window.Watch = (()=>{
     if(!cfgOk()) { paintState(); return; }
     if(W.polling && Date.now() - W.polling < 35000) return;   // 前の問い合わせがまだ終わっていない
     W.polling = Date.now();
-    try{ const j = await post({watch:1}); W.live = j.live || null; W.msgs = j.msgs || []; W.err = ""; }
+    try{ const j = await post({watch:1}); W.live = j.live || null; W.msgs = j.msgs || []; W.err = "";
+      if(oldPractice(W.live)){ W.hiddenAt = W.live.at; W.live = null; } else W.hiddenAt = 0; }
     catch(e){ W.err = e.message || "通信できませんでした"; }
     W.polling = 0;
     paint();
+  }
+  // 本番の日（11/15）以外の計測（練習・テスト）は、終わってから10分たったら出さない
+  const RACE_DAY = "2026-11-15";
+  function oldPractice(lv){
+    if(!lv || lv.state !== "finished" || Date.now() - lv.at < 600000) return false;
+    const s = new Date(lv.at - (Number(lv.el) || 0)*1000);
+    return `${s.getFullYear()}-${E.pad(s.getMonth()+1)}-${E.pad(s.getDate())}` !== RACE_DAY;
   }
   const liveEl = lv => lv.state === "running" ? lv.el + (Date.now() - lv.at)/1000 : lv.el;
   // ランナーのアプリの状態：アプリは30秒ごとに合図を送る（GPSが取れないときも）
@@ -112,7 +120,7 @@ window.Watch = (()=>{
     const el = document.getElementById("wstate"), el2 = document.getElementById("wstate2"), card = document.getElementById("wstatecard"); if(!el) return;
     const lv = W.live;
     if(W.err){ el.textContent = "⚠ " + W.err; el2.textContent = "応援画面の通信がうまくいっていません。電波を確認してください"; return; }
-    if(!lv){ el.textContent = "まだ計測の記録がありません"; el2.textContent = "ランナーが「スタート」を押すと、ここに状況が出ます"; return; }
+    if(!lv){ el.textContent = "今は計測していません"; el.style.color = ""; el2.textContent = "ランナーが「スタート」を押すと、ここに状況が出ます"; if(card) card.style.borderColor = ""; return; }
     const st = appStatus(lv);
     el.textContent = (lv.sim ? "【シミュレーション】" : "") + st.t; el.style.color = st.c; el2.textContent = st.d;
     if(card) card.style.borderColor = st.c;
@@ -121,7 +129,7 @@ window.Watch = (()=>{
     const body = document.getElementById("wbody"); if(!body) return;
     const lv = W.live;
     paintState(); paintMsgs();
-    if(!lv){ body.innerHTML = `<div class="card"><p class="small muted">ランナーが「スタート」を押すと、ここに状況が出ます。</p></div>`; return; }
+    if(!lv){ body.innerHTML = `<div class="card"><p class="small muted">ランナーが「スタート」を押すと、ここに状況が出ます。</p></div>`; updateMap(null); return; }
     const g = lv.gate, last = lv.laps && lv.laps[lv.laps.length-1];
     body.innerHTML = `
       <div class="card">
@@ -229,7 +237,7 @@ window.Watch = (()=>{
   function paintMsgs(){
     const box = document.getElementById("wmsgs"); if(!box) return;
     // 今の計測（スタート以降）に送ったメッセージだけを出す
-    const lv = W.live, since = lv ? lv.at - (Number(lv.el) || 0)*1000 - 3*3600000 : 0;   // スタートの3時間前から
+    const lv = W.live, since = lv ? lv.at - (Number(lv.el) || 0)*1000 - 3*3600000 : (W.hiddenAt || 0);   // スタートの3時間前から（練習の表示を消したときは、その計測が終わった後に送った分だけ）
     const list = W.msgs.filter(m=>!(m.at < since));
     box.innerHTML = list.length ? `<p class="small muted" style="margin-top:6px">送ったメッセージ</p>` + list.slice().reverse().slice(0,12).map(m=>{ const t = new Date(m.at);
       return `<div class="spread small" style="border-top:1px solid var(--line);padding:4px 0"><span>${t.getHours()}:${E.pad(t.getMinutes())} ${m.voice ? "🎤 声のメッセージ" : esc(m.text)}</span><b class="${m.deliveredAt?"good":"muted"}">${m.deliveredAt ? "届いた" : "未達"}</b></div>`; }).join("") : "";
