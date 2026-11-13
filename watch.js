@@ -46,10 +46,55 @@ window.Watch = (()=>{
     if(/[^\u3041-\u309f\u30fc\s　・]/.test(v) && !confirm("名前に、ひらがな以外の文字が入っています。読み上げで読み間違えることがあります。\nこのまま送りますか？\n（「キャンセル」を押すと、名前を直せます）")){ if(el) el.focus(); return false; }
     conf.from = v; save(); return true;
   }
+  // 本番までのカウントダウン（号砲 2026/11/15 9:00 日本時間）。号砲を過ぎたら出さない
+  const GUN_AT = Date.parse("2026-11-15T09:00:00+09:00");
+  // 本番の日に、ランナーの計測が始まった（応援画面に届いた）か。シミュレーションや練習は含めない
+  function raceStarted(){
+    const lv = W.live; if(!lv || lv.sim || (lv.state !== "running" && lv.state !== "finished")) return false;
+    const st = lv.at - (Number(lv.el) || 0)*1000;
+    return st >= GUN_AT - 3600000 && st < GUN_AT + 15*3600000;
+  }
+  // メッセージ：前日までは練習・テストで使える。本番の日（11/15）は、ランナーのスタートを確認できるまで送れない（間違って早く送らないように）
+  const RACE_DAY0 = Date.parse("2026-11-15T00:00:00+09:00"), RACE_DAY1 = Date.parse("2026-11-16T00:00:00+09:00");
+  const lockedDay = ()=>{ const n = Date.now(); return n >= RACE_DAY0 && n < RACE_DAY1; };
+  const canSend = ()=>!lockedDay() || raceStarted();
+  function paintMsgGate(){
+    const ok = canSend(), note = document.getElementById("wmsgnote");
+    if(note){ const h = !lockedDay() && Date.now() < RACE_DAY0 ? `<p class="small muted" style="margin:4px 0 0">前日までは、練習・テスト用に送れます。本番の日（11/15）は、ランナーのスタートを確認できてから送れるようになります。</p>` : ok ? "" : `<div style="margin:6px 0 2px;padding:10px 12px;border-radius:10px;background:rgba(245,184,61,.14);border:1px solid rgba(245,184,61,.55);color:#ffd27a;font-size:14px;font-weight:700;line-height:1.5">当日スタートまで、メッセージは反映されません。<br>スタートを確認できてから送信してください。</div>`;
+      if(note.innerHTML !== h) note.innerHTML = h; }
+    ["send","rec","sendvoice"].forEach(a=>{ const b = document.querySelector(`[data-w="${a}"]`); if(b && !(a === "rec" && W.rec && W.rec.state === "recording")){ b.disabled = !ok; b.style.opacity = ok ? "" : ".45"; } });
+  }
+  function paintCountdown(){
+    const box = document.getElementById("wcd"); if(!box) return;
+    const left = Math.floor((GUN_AT - Date.now())/1000);
+    if(left <= 0){
+      // 号砲のあと：ランナーの計測が届くまでは「もう少しお待ちください」
+      const h = raceStarted() || Date.now() > GUN_AT + 15*3600000 ? "" : `<div style="border-radius:16px;padding:14px;margin:0 0 12px;background:linear-gradient(135deg,#0b2a5c 0%,#123f86 55%,#b3122e 130%);box-shadow:0 6px 18px rgba(0,0,0,.35);color:#fff">
+        <div style="font-size:12px;font-weight:700;letter-spacing:3px;color:#ffd27a">KOBE MARATHON</div>
+        <div style="font-size:22px;font-weight:900;letter-spacing:1px;margin:2px 0 8px">神戸マラソン2026</div>
+        <div style="font-size:17px;font-weight:800;line-height:1.5">🏃 スタートしました！</div>
+        <div style="font-size:15px;font-weight:700;line-height:1.5;color:#e6ecf5">ランナーがスタートラインを越えるまで、もう少しお待ちください。</div></div>`;
+      if(box.innerHTML !== h) box.innerHTML = h; return;
+    }
+    const d = Math.floor(left/86400), h = Math.floor(left%86400/3600), m = Math.floor(left%3600/60), x = left%60;
+    const unit = (v, u)=>`<div style="flex:1;min-width:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:8px 2px 6px;text-align:center">
+        <div class="num" style="font-size:clamp(26px,9vw,40px);font-weight:900;line-height:1;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:.5px">${v}</div>
+        <div style="font-size:11px;font-weight:700;color:#ffd27a;margin-top:4px;letter-spacing:1px">${u}</div></div>`;
+    const html = `<div style="position:relative;overflow:hidden;border-radius:16px;padding:14px 14px 12px;margin:0 0 12px;background:linear-gradient(135deg,#0b2a5c 0%,#123f86 55%,#b3122e 130%);box-shadow:0 6px 18px rgba(0,0,0,.35);color:#fff">
+      <div style="position:absolute;right:-18px;top:-22px;font-size:96px;font-weight:900;opacity:.07;line-height:1;pointer-events:none">42.195</div>
+      <div style="font-size:12px;font-weight:700;letter-spacing:3px;color:#ffd27a">KOBE MARATHON</div>
+      <div style="font-size:22px;font-weight:900;letter-spacing:1px;margin:2px 0 2px">神戸マラソン2026</div>
+      <div style="font-size:12px;color:#cfd8e6;margin-bottom:10px">2026年11月15日（日）9:00 スタートまで</div>
+      <div style="display:flex;gap:6px">${unit(d,"日")}${unit(E.pad(h),"時間")}${unit(E.pad(m),"分")}${unit(E.pad(x),"秒")}</div>
+    </div>`;
+    if(box.innerHTML !== html) box.innerHTML = html;
+  }
+  setInterval(()=>{ if(!document.hidden) paintCountdown(); }, 1000);
   function render(app){
     root = app;
     app.innerHTML = `<div class="wrap">
       <div class="hdr"><div class="brand">神戸マラソン <span>応援</span></div></div>
+      <div id="wcd"></div>
       ${cfgOk() ? "" : `<div class="card"><b>共有の設定</b>
         <label class="field">応援用リンク（まるごと貼り付け）または ウェブアプリのURL<input class="inp" id="wurl" placeholder="https://…"></label>
         <label class="field">合言葉<input class="inp" id="wkey"></label>
@@ -66,6 +111,7 @@ window.Watch = (()=>{
       </div>
       <div class="card">
         <b>メッセージを送る</b>
+        <div id="wmsgnote"></div>
         <label class="field">あなたの名前（ひらがなで入力）<input class="inp" id="wfrom" value="${esc(conf.from)}" placeholder="例：たろう"></label>
         <p class="small muted" style="margin:-4px 0 0">読み上げで「◯◯さんから」と言います。漢字だと読み間違えることがあるので、ひらがなで入れてください。</p>
         <textarea class="inp" id="wtext" rows="3" placeholder="メッセージを書く（短めがおすすめ）"></textarea>
@@ -80,7 +126,7 @@ window.Watch = (()=>{
       <p class="small muted">ランナーのアプリから30秒ごとに状況が届きます。メッセージは、ランナーのアプリが次に通信したとき（最大30秒ほど）に読み上げ・再生されます。</p>
     </div>`;
     if(W.map){ try{ W.map.remove(); }catch(e){} } W.map = null; W.layers = {}; W.centered = false;
-    paint(); poll();
+    paintCountdown(); paint(); poll();
     clearInterval(W.timer); W.timer = setInterval(()=>{ if(!document.hidden) poll(); else paintState(); }, 15000);
     clearInterval(W.tick); W.tick = setInterval(()=>{ if(!document.hidden){ paintState(); moveEst(); } }, 2000);
   }
@@ -128,7 +174,7 @@ window.Watch = (()=>{
   function paint(){
     const body = document.getElementById("wbody"); if(!body) return;
     const lv = W.live;
-    paintState(); paintMsgs();
+    paintState(); paintMsgs(); paintMsgGate(); paintCountdown();
     if(!lv){ body.innerHTML = `<div class="card"><p class="small muted">ランナーが「スタート」を押すと、ここに状況が出ます。</p></div>`; updateMap(null); return; }
     const g = lv.gate, last = lv.laps && lv.laps[lv.laps.length-1];
     body.innerHTML = `
@@ -240,11 +286,12 @@ window.Watch = (()=>{
     const lv = W.live, since = lv ? lv.at - (Number(lv.el) || 0)*1000 - 3*3600000 : (W.hiddenAt || 0);   // スタートの3時間前から（練習の表示を消したときは、その計測が終わった後に送った分だけ）
     const list = W.msgs.filter(m=>!(m.at < since));
     box.innerHTML = list.length ? `<p class="small muted" style="margin-top:6px">送ったメッセージ</p>` + list.slice().reverse().slice(0,12).map(m=>{ const t = new Date(m.at);
-      return `<div class="spread small" style="border-top:1px solid var(--line);padding:4px 0"><span>${t.getHours()}:${E.pad(t.getMinutes())} ${m.voice ? "🎤 声のメッセージ" : esc(m.text)}</span><b class="${m.deliveredAt?"good":"muted"}">${m.deliveredAt ? "届いた" : "未達"}</b></div>`; }).join("") : "";
+      return `<div class="spread small" style="border-top:1px solid var(--line);padding:4px 0"><span>${t.getHours()}:${E.pad(t.getMinutes())} ${m.from ? `<b>${esc(m.from)}</b>：` : ""}${m.voice ? "🎤 声のメッセージ" : esc(m.text)}</span><b class="${m.deliveredAt?"good":"muted"}">${m.deliveredAt ? "届いた" : "未達"}</b></div>`; }).join("") : "";
   }
   async function sendText(text){
     text = String(text||"").trim(); if(!text) return;
     if(!cfgOk()){ toast("共有が設定されていません"); return; }
+    if(!canSend()){ alert("まだランナーのスタートを確認できていません。スタートを確認できてから送信してください。"); return; }
     if(!fromOk()) return;
     try{ await post({msg:{text, from:conf.from}}); toast("送信しました"); const ta = document.getElementById("wtext"); if(ta) ta.value = ""; poll(); }
     catch(e){ toast(e.message || "送信できませんでした"); }
@@ -278,6 +325,7 @@ window.Watch = (()=>{
   async function sendVoice(){
     if(!W.blob) return;
     if(!cfgOk()){ toast("共有が設定されていません"); return; }
+    if(!canSend()){ alert("まだランナーのスタートを確認できていません。スタートを確認できてから送信してください。"); return; }
     if(!fromOk()) return;
     const b64 = await new Promise((ok, ng)=>{ const r = new FileReader(); r.onload = ()=>ok(String(r.result).split(",")[1] || ""); r.onerror = ng; r.readAsDataURL(W.blob); });
     try{ await post({voice:{data:b64, mime:W.mime, from:conf.from, sec:Math.round((Date.now()-W.recStart)/1000)}}); toast("声を送りました"); W.blob = null; document.getElementById("wprev").hidden = true; poll(); }
@@ -299,7 +347,7 @@ window.Watch = (()=>{
     }
     if(a === "quick") sendText(b.textContent);
     if(a === "send") sendText(document.getElementById("wtext").value);
-    if(a === "rec") recToggle();
+    if(a === "rec"){ if(!(W.rec && W.rec.state === "recording") && !canSend()){ alert("まだランナーのスタートを確認できていません。スタートを確認できてから送信してください。"); return; } recToggle(); }
     if(a === "sendvoice") sendVoice();
     if(a === "discard"){ W.blob = null; document.getElementById("wprev").hidden = true; }
   });
