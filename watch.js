@@ -90,6 +90,134 @@ window.Watch = (()=>{
     if(box.innerHTML !== html) box.innerHTML = html;
   }
   setInterval(()=>{ if(!document.hidden) paintCountdown(); }, 1000);
+  /* ---------- 本番の記録・完走証・届いたメッセージ（本番の日にゴールしたあと） ---------- */
+  const RUNNER = "岡田 耕治";
+  // 本番のゴールの記録とメッセージを、この端末にも控えておく（あとで練習を始めても見られるように）
+  function raceResult(){
+    const lv = W.live;
+    if(lv && lv.state === "finished" && lv.goal && raceStarted()){
+      const st = lv.at - (Number(lv.el) || 0)*1000, day0 = RACE_DAY0;
+      const r = {el:lv.el, startClock:lv.startClock, finishClock:(Number(lv.startClock) || 0) + (Number(lv.el) || 0), name:lv.name || RUNNER, at:lv.at,
+        msgs:(W.msgs || []).filter(m=>m.at >= day0 && m.at < RACE_DAY1).sort((a,b)=>a.at - b.at)};
+      const old = W.raceSaved || loadRace();
+      if(old && old.msgs) old.msgs.forEach(m=>{ if(!r.msgs.some(x=>x.id === m.id)) r.msgs.push(m); });
+      r.msgs.sort((a,b)=>a.at - b.at);
+      W.raceSaved = r; try{ localStorage.setItem("kobe-watch-race", JSON.stringify(r)); }catch(e){}
+      return r;
+    }
+    return W.raceSaved || loadRace();
+  }
+  function loadRace(){ try{ const r = JSON.parse(localStorage.getItem("kobe-watch-race") || "null"); if(r && r.el) return (W.raceSaved = r); }catch(e){} return null; }
+  const hms = c=>{ c = Math.round(c); return `${Math.floor(c/3600)}:${E.pad(Math.floor(c%3600/60))}:${E.pad(c%60)}`; };
+  function paintResult(){
+    const box = document.getElementById("wresult"); if(!box) return;
+    const r = raceResult();
+    if(!r){ if(box.innerHTML) box.innerHTML = ""; return; }
+    const list = r.msgs.map(m=>{ const t = new Date(m.at);
+      return `<div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding:8px 0">
+        <div style="flex:1;min-width:0"><div class="small muted">${t.getHours()}:${E.pad(t.getMinutes())}・<b style="color:#fff">${esc(m.from || "応援")}</b>さんから</div>
+        <div style="font-size:16px;line-height:1.5;word-break:break-all">${m.voice ? "🎤 声のメッセージ" + (m.sec ? `（${m.sec}秒）` : "") : esc(m.text)}</div></div>
+        <button class="btn ghost" data-w="play" data-id="${esc(m.id)}" style="flex:0 0 auto;min-height:40px;padding:4px 12px">▶</button></div>`; }).join("");
+    const h = `<div class="card" style="border:2px solid #f5b83d">
+      <div style="font-size:12px;font-weight:700;letter-spacing:3px;color:#ffd27a">KOBE MARATHON 2026</div>
+      <div style="font-size:20px;font-weight:900;margin:2px 0 8px">🏁 完走おめでとうございます！</div>
+      <div class="spread"><span class="small muted">記録（ネットタイム）</span><b class="num" style="font-size:30px">${E.fmtDur(r.el)}</b></div>
+      <div class="spread small" style="margin-top:4px"><span>スタート <b class="num">${hms(r.startClock)}</b></span><span>フィニッシュ <b class="num">${hms(r.finishClock)}</b></span></div>
+      <button class="btn primary" data-w="cert" style="margin-top:10px">完走証を見る</button>
+    </div>
+    <div class="card"><div class="spread"><b>届いたメッセージ（${r.msgs.length}件）</b></div>
+      ${r.msgs.length ? `<button class="btn" data-w="playall" style="margin:6px 0">▶ 全部を順番に再生</button>${list}` : `<p class="small muted">ありません</p>`}</div>`;
+    if(box.dataset.h !== h){ box.innerHTML = h; box.dataset.h = h; }
+  }
+  // 完走証（ランナーのアプリと同じデザイン）
+  function laurel(){
+    let s = ""; const cx = 120, cy = 60, rx = 106, ry = 60;
+    for(let side = -1; side <= 1; side += 2) for(let i = 0; i < 9; i++){
+      const t = (14 + i*17) * Math.PI/180, x = cx + side*rx*Math.sin(t), y = cy + ry*Math.cos(t);
+      const ang = Math.atan2(-ry*Math.sin(t), side*rx*Math.cos(t)) * 180/Math.PI;
+      for(const tilt of [-34, 34]) s += `<ellipse cx="${(x + 7).toFixed(1)}" cy="${y.toFixed(1)}" rx="9" ry="3.6" fill="url(#leaf)" transform="rotate(${(ang + tilt).toFixed(0)} ${x.toFixed(1)} ${y.toFixed(1)})"/>`;
+    }
+    return `<svg viewBox="0 0 240 130" class="laurel" aria-hidden="true"><defs><linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a9e2b4"/><stop offset=".55" stop-color="#4fae74"/><stop offset="1" stop-color="#1f7a4c"/></linearGradient></defs>${s}</svg>`;
+  }
+  function fitLine(el, min){
+    const box = el.parentElement; if(!box) return;
+    const cs = getComputedStyle(box), avail = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    let fs = parseFloat(getComputedStyle(el).fontSize), n = 0;
+    while(el.getBoundingClientRect().width > avail && fs > min && n++ < 60){ fs -= 1; el.style.fontSize = fs + "px"; }
+  }
+  function fitCert(bg){
+    const cert = bg.querySelector(".cert"); if(!cert) return;
+    cert.style.zoom = "";
+    bg.querySelectorAll(".cert-en,.cert-title,.cert-event,.cert-eventen,.cert-name,.cert-rec,.cert-stats b,.cert-date").forEach(el=>fitLine(el, 9));
+    for(const sel of [".cert-text span", ".cert-stats span"]){
+      const els = [...bg.querySelectorAll(sel)]; els.forEach(el=>fitLine(el, 8));
+      const m = Math.min(...els.map(el=>parseFloat(getComputedStyle(el).fontSize))); els.forEach(el=>{ el.style.fontSize = m + "px"; });
+    }
+    const cs = getComputedStyle(bg), btns = bg.querySelector(".cert-btns");
+    const avail = bg.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - (btns ? btns.offsetHeight : 0) - 12, h = cert.offsetHeight;
+    if(avail > 200 && h > avail) cert.style.zoom = Math.max(0.55, Math.floor(avail / h * 1000) / 1000);
+  }
+  function openCert(){
+    const r = raceResult(); if(!r) return;
+    const old = document.querySelector(".cert-bg"); if(old) old.remove();
+    const hm = c=>{ c = Math.round(c); return `${Math.floor(c/3600)}:${E.pad(Math.floor(c%3600/60))}`; };
+    const bg = document.createElement("div"); bg.className = "cert-bg";
+    bg.innerHTML = `<div class="cert"><div class="cert-in">
+        <div class="cert-en">FINISHER CERTIFICATE</div>
+        <div class="cert-wreath">${laurel()}<div class="cert-title">完走証</div></div>
+        <div class="cert-event"><span class="cert-kobe">神戸マラソン</span><span class="cert-year">2026</span></div>
+        <div class="cert-eventen">KOBE MARATHON 2026</div>
+        <div class="cert-name">${esc(r.name || RUNNER)}<small> 殿</small></div>
+        <p class="cert-text"><span>あなたは 神戸マラソン2026 において</span><span>フルマラソン 42.195km を</span><span>見事に完走されました。</span><span>その健闘をたたえ、ここに証します。</span></p>
+        <div class="cert-rec"><div class="cert-kanso">完走</div><div class="cert-time"><span>記録（ネットタイム）</span><b>${E.fmtDur(r.el)}</b></div></div>
+        <div class="cert-stats">
+          <div><span>走行距離</span><b>42.195<small>km</small></b></div>
+          <div><span>スタート</span><b>${hm(r.startClock)}</b></div>
+          <div><span>フィニッシュ</span><b>${hm(r.finishClock)}</b></div>
+        </div>
+        <div class="cert-date">2026年11月15日</div>
+        <div class="cert-foot">KOBEレースナビによる計測（スタートラインからの時間）</div>
+      </div></div>
+      <div class="cert-btns"><button class="btn primary" data-w="certclose">閉じる</button></div>`;
+    document.body.appendChild(bg);
+    const onResize = ()=>{ if(bg.isConnected) fitCert(bg); else removeEventListener("resize", onResize); };
+    addEventListener("resize", onResize);
+    fitCert(bg);
+    if(document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ if(bg.isConnected) fitCert(bg); });
+  }
+  // メッセージの再生：文字は読み上げ、声はそのまま再生
+  let playing = null, playAllOn = false;
+  function stopAll(){ playAllOn = false; try{ speechSynthesis.cancel(); }catch(e){} if(playing && playing.pause) try{ playing.pause(); }catch(e){} playing = null;
+    document.querySelectorAll('[data-w="playall"]').forEach(b=>{ b.textContent = "▶ 全部を順番に再生"; }); }
+  function playMsg(m, btn){
+    return new Promise(async ok=>{
+      const from = m.from ? m.from + "さんから。" : "";
+      if(btn){ btn.textContent = "…"; }
+      const done = ()=>{ if(btn) btn.textContent = "▶"; ok(); };
+      if(m.voice){
+        try{
+          const j = await post({getvoice:m.voice});
+          if(!j.data){ toast("声のメッセージを読み込めませんでした"); done(); return; }
+          const a = new Audio(`data:${j.mime || m.mime || "audio/webm"};base64,${j.data}`); playing = a;
+          a.onended = done; a.onerror = ()=>{ toast("この端末では声を再生できませんでした"); done(); };
+          await a.play().catch(()=>{ toast("この端末では声を再生できませんでした"); done(); });
+        }catch(e){ toast("声のメッセージを読み込めませんでした"); done(); }
+      } else {
+        try{
+          const u = new SpeechSynthesisUtterance(`応援メッセージ。${from}${m.text}`); u.lang = "ja-JP";
+          u.onend = done; u.onerror = done; playing = null; speechSynthesis.speak(u);
+          setTimeout(done, 8000 + String(m.text).length*400);
+        }catch(e){ toast("この端末では読み上げできませんでした"); done(); }
+      }
+    });
+  }
+  async function playAll(btn){
+    if(playAllOn){ stopAll(); return; }
+    const r = raceResult(); if(!r) return;
+    stopAll(); playAllOn = true; btn.textContent = "■ 止める";
+    for(const m of r.msgs){ if(!playAllOn) break; await playMsg(m, document.querySelector(`[data-w="play"][data-id="${CSS.escape(m.id)}"]`)); }
+    playAllOn = false; btn.textContent = "▶ 全部を順番に再生";
+  }
   function render(app){
     root = app;
     app.innerHTML = `<div class="wrap">
@@ -101,6 +229,7 @@ window.Watch = (()=>{
         <button class="btn primary" data-w="conn">接続する</button>
         <p class="small muted">ランナーから送られた「応援用リンク」を開くと、自動で入ります。</p></div>`}
       <div class="card" id="wstatecard"><div class="spread"><b id="wstate">読み込み中…</b><button class="btn ghost" data-w="refresh">更新</button></div><div class="small" id="wstate2"></div></div>
+      <div id="wresult"></div>
       <div id="wbody"></div>
       <div class="card" id="wmapcard" hidden>
         <div class="spread"><b>現在地</b><button class="btn ghost" data-w="center">ランナーを中心に</button></div>
@@ -232,7 +361,7 @@ window.Watch = (()=>{
   function paint(){
     const body = document.getElementById("wbody"); if(!body) return;
     const lv = W.live;
-    paintState(); paintMsgs(); paintMsgGate(); paintCountdown();
+    paintState(); paintMsgs(); paintMsgGate(); paintCountdown(); paintResult();
     if(!lv){ body.innerHTML = `<div class="card"><p class="small muted">ランナーが「スタート」を押すと、ここに状況が出ます。</p></div>`; updateMap(null); return; }
     const g = lv.gate, last = lv.laps && lv.laps[lv.laps.length-1];
     body.innerHTML = `
@@ -394,6 +523,10 @@ window.Watch = (()=>{
   document.addEventListener("click", e=>{
     const b = e.target.closest("[data-w]"); if(!b) return;
     const a = b.dataset.w;
+    if(a === "cert"){ openCert(); return; }
+    if(a === "certclose"){ const bg = document.querySelector(".cert-bg"); if(bg) bg.remove(); return; }
+    if(a === "play"){ const m = (raceResult() || {}).msgs?.find(x=>x.id === b.dataset.id); if(m){ stopAll(); playMsg(m, b); } return; }
+    if(a === "playall"){ playAll(b); return; }
     if(a === "reset"){ if(!confirm("接続の設定を消します。消すと、もう一度「応援用リンク」を開くまで状況が見られなくなります。消しますか？")) return; conf.url = ""; conf.key = ""; save(); W.live = null; render(root); }
     if(a === "refresh") poll();
     if(a === "center" && W.map && W.live){ const e = estimate(W.live); if(e.pos || W.live.pos) W.map.setView(e.pos || W.live.pos, Math.max(W.map.getZoom(), 15)); }
