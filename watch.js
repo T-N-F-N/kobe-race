@@ -135,7 +135,8 @@ window.Watch = (()=>{
     if(W.polling && Date.now() - W.polling < 35000) return;   // 前の問い合わせがまだ終わっていない
     W.polling = Date.now();
     try{ const j = await post({watch:1}); W.live = j.live || null; W.msgs = j.msgs || []; W.err = "";
-      if(oldPractice(W.live)){ W.hiddenAt = W.live.at; W.live = null; } else W.hiddenAt = 0; }
+      if(oldPractice(W.live)){ W.hiddenAt = W.live.at; W.live = null; } else W.hiddenAt = 0;
+      W.live = trueKm(W.live); }
     catch(e){ W.err = e.message || "通信できませんでした"; }
     W.polling = 0;
     paint();
@@ -146,6 +147,35 @@ window.Watch = (()=>{
     if(!lv || lv.state !== "finished" || Date.now() - lv.at < 600000) return false;
     const s = new Date(lv.at - (Number(lv.el) || 0)*1000);
     return `${s.getFullYear()}-${E.pad(s.getMonth()+1)}-${E.pad(s.getDate())}` !== RACE_DAY;
+  }
+  // アプリの距離が進みすぎているとき：届いた位置（白丸）をコースに当てて、本当の距離で表示する（応援画面だけ）
+  const GATES = [["御旅公園",3.8,"10:00"],["工業技術センター",8.0,"10:36"],["須磨一ノ谷プラザ",10.7,"10:59"],["舞子公園",17.5,"11:57"],
+    ["大蔵海岸西",20.7,"12:25"],["舞子駅",23.9,"12:53"],["垂水下水処理場",27.1,"13:23"],["須磨一ノ谷プラザ",31.1,"14:02"],
+    ["須磨海浜公園",32.7,"14:18"],["駒ヶ林会館",35.4,"14:46"],["中央卸売市場第7門",39.8,"15:33"]];
+  function trueKm(lv){
+    const c = course();
+    if(!lv || !c || !lv.pos || lv.sim || lv.state !== "running") return lv;
+    const runId = lv.at - (Number(lv.el) || 0)*1000;
+    if(!W.tk || Math.abs(W.tk.run - runId) > 120000) W.tk = {run:runId, km:null};
+    const d = Number(lv.dist) || 0;
+    // 進む向き（同じ道を行きと帰りで通るので、向きで見分ける）
+    let head = null; const tr = lv.track || [];
+    for(let i = tr.length-2; i >= 0 && tr.length; i--){ const a = tr[i], b = tr[tr.length-1];
+      if(E.hav([a[0],a[1]], [b[0],b[1]]) >= 15){ const hx = (b[1]-a[1])*Math.cos(b[0]*Math.PI/180)*111320, hy = (b[0]-a[0])*110540, n = Math.hypot(hx, hy); if(n > 0) head = [hx/n, hy/n]; break; } }
+    const prev = W.tk.km;
+    const lo = prev != null ? Math.max(0, prev - 0.3) : Math.max(0, d*0.5 - 0.5);
+    const pr = E.project(c, lv.pos, lo, Math.min(42.195, d + 0.3), prev != null ? prev : d/1.5, head);
+    if(!pr || pr.off > 60) return lv;
+    W.tk.km = prev != null ? Math.max(prev - 0.05, pr.km) : pr.km;
+    const km = W.tk.km;
+    if(d - km < 0.15) return lv;   // ずれが小さい（またはアプリが短め）ときは、アプリの距離のまま
+    const out = Object.assign({}, lv, {dist:km, appDist:d, fixedKm:true, off:false, near:false, cur:null, cum:null, predPlan:null, predRecent:null, laps:[], avg:km > 0.3 ? lv.el/km : null});
+    // 次の関門も、本当の距離で出し直す
+    const ng = GATES.find(g=>g[1] > km + 0.02);
+    if(ng){ const close = E.parseHM(ng[2]), t = new Date(lv.at), clock = t.getHours()*3600 + t.getMinutes()*60 + t.getSeconds(), left = close - clock, rem = ng[1] - km;
+      out.gate = {name:ng[0], km:ng[1], close, rem, left, req:left > 0 && rem > 0 ? left/rem : null, margin:null}; }
+    else out.gate = null;
+    return out;
   }
   const liveEl = lv => lv.state === "running" ? lv.el + (Date.now() - lv.at)/1000 : lv.el;
   // ランナーのアプリの状態：アプリは30秒ごとに合図を送る（GPSが取れないときも）
@@ -180,6 +210,7 @@ window.Watch = (()=>{
     body.innerHTML = `
       <div class="card">
         <div class="spread"><b>${esc(lv.name || "ランナー")}</b><span class="small muted">スタート ${E.fmtClockS(lv.startClock)}</span></div>
+        ${lv.fixedKm ? `<p class="small" style="margin:0 0 6px;color:#ffd27a">ランナーのアプリの距離（${fmtKm(lv.appDist)}km）が進みすぎているため、実際の位置（白い丸）から求めた距離を出しています。</p>` : ""}
         <div class="big"><div class="d num"><span>${fmtKm(lv.dist)}</span><small>km</small></div><div class="t"><b class="num">${E.fmtDur(liveEl(lv))}</b><span>スタートから</span></div></div>
         <div class="tiles">
           <div><span>目標ペース</span><b>${E.fmtPace(lv.target)}</b></div>
