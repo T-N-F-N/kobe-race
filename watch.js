@@ -160,7 +160,10 @@ window.Watch = (()=>{
     const c = course();
     if(!lv || !c || !lv.pos || lv.sim || lv.state !== "running") return lv;
     const runId = lv.at - (Number(lv.el) || 0)*1000;
-    if(!W.tk || Math.abs(W.tk.run - runId) > 120000) W.tk = {run:runId, km:null};
+    if(!W.tk || Math.abs(W.tk.run - runId) > 120000){
+      W.tk = {run:runId, km:null, hist:[]};
+      try{ const sv = JSON.parse(localStorage.getItem("kobe-watch-tk") || "null"); if(sv && Math.abs(sv.run - runId) <= 120000 && Array.isArray(sv.hist)){ W.tk.hist = sv.hist; if(sv.hist.length) W.tk.km = sv.hist[sv.hist.length-1][1]; } }catch(e){}
+    }
     const d = Number(lv.dist) || 0;
     // 進む向き（同じ道を行きと帰りで通るので、向きで見分ける）
     let head = null; const tr = lv.track || [];
@@ -175,14 +178,21 @@ window.Watch = (()=>{
     if(d - km < 0.15) return lv;   // ずれが小さい（またはアプリが短め）ときは、アプリの距離のまま
     // 本当の距離の移り変わりから、今のペースを推定する（3〜6分前と比べる）
     const h = W.tk.hist || (W.tk.hist = []);
-    if(!h.length || h[h.length-1][0] !== lv.at) h.push([lv.at, km]);
-    while(h.length > 1 && lv.at - h[0][0] > 600000) h.shift();
+    if(!h.length || h[h.length-1][0] < lv.at) h.push([lv.at, +km.toFixed(3)]);
+    while(h.length > 1 && (lv.at - h[0][0] > 5*3600000 || h.length > 1500)) h.shift();
+    try{ localStorage.setItem("kobe-watch-tk", JSON.stringify({run:W.tk.run, hist:h})); }catch(e){}
     let cur = null;
-    const ref = h.filter(x=>lv.at - x[0] >= 180000).pop() || (lv.at - h[0][0] >= 90000 ? h[0] : null);
+    const recent = h.filter(x=>lv.at - x[0] <= 900000);
+    const ref = recent.filter(x=>lv.at - x[0] >= 180000).pop() || (recent.length && lv.at - recent[0][0] >= 90000 ? recent[0] : null);
     if(ref){ const dk = km - ref[1], dt = (lv.at - ref[0])/1000; if(dk > 0.1 && dt > 60 && dt/dk > 150 && dt/dk < 3600) cur = dt/dk; }   // キロ2分30秒〜60分の範囲だけ使う
     const el = Number(lv.el) || 0, avg = km > 0.3 ? el/km : null, clock = (Number(lv.startClock) || 0) + el;
+    const tAt = k=>{ if(k <= 0) return W.tk.run;
+      for(let i = 1; i < h.length; i++){ const a = h[i-1], b = h[i]; if(a[1] < k && b[1] >= k && b[1] > a[1]) return b[0] - a[0] <= 300000 ? a[0] + (k - a[1])/(b[1] - a[1])*(b[0] - a[0]) : null; }
+      return null; };
+    const K = Math.floor(km + 1e-9); let lap = null;
+    if(K >= 1){ const t1 = tAt(K), t0 = tAt(K-1); if(t1 && t0 && t1 > t0){ const sec = (t1 - t0)/1000; if(sec > 150 && sec < 3600) lap = [K, Math.round(sec), Math.round(sec - planTime(K-1, K)), 0]; } }
     const pace = cur || avg;
-    const out = Object.assign({}, lv, {dist:km, appDist:d, fixedKm:true, off:false, near:false, laps:[],
+    const out = Object.assign({}, lv, {dist:km, appDist:d, fixedKm:true, off:false, near:false, laps:lap ? [lap] : [],
       cur, avg, target:segPace(km),
       cum:Math.round(clock - ((Number(lv.startClock) || 0) + planTime(0, km))),                 // 予定より何秒遅れているか（マイナスは早い）
       predPlan:clock + planTime(km, 42.195),                                                  // これから予定のペースで走ったとき
@@ -236,7 +246,7 @@ window.Watch = (()=>{
           <div><span>予定との差</span><b class="${lv.cum>3?"bad":"good"}">${lv.cum==null ? "—" : (Math.abs(lv.cum)<3 ? "±0" : (lv.cum>0?"+":"−") + E.fmtDur(Math.abs(lv.cum)))}</b></div>
         </div>
         <div class="tiles">
-          <div><span>直前のラップ</span><b>${last && !last[3] ? E.fmtPace(last[1]) : "—"}</b></div>
+          <div><span>直前のラップ${lv.fixedKm && last ? `（${last[0]}km）` : ""}</span><b>${last && !last[3] ? E.fmtPace(last[1]) : "—"}</b></div>
           <div><span>ゴール予想(目標)</span><b>${E.fmtClock(lv.predPlan)}</b></div>
           <div><span>今のペースなら</span><b>${E.fmtClock(lv.predRecent)}</b></div>
         </div>
