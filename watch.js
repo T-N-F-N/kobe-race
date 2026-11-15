@@ -93,7 +93,11 @@ window.Watch = (()=>{
   /* ---------- 本番の記録・完走証・届いたメッセージ（本番の日にゴールしたあと） ---------- */
   const RUNNER = "岡田 耕治";
   // 本番のゴールの記録とメッセージを、この端末にも控えておく（あとで練習を始めても見られるように）
-  function raceResult(){
+  // 本番のスタートラインを越えた本当の時刻（ランナーのアプリの記録は 9:18:16 だったので、ここで直す）
+  const RACE_START = 9*3600 + 19*60 + 7, RACE_FINISH = 15*3600 + 10*60 + 2;   // 本当のスタート 9:19:07・ゴール 15:10:02
+  const fixStart = r=>r && Object.assign({}, r, {startClock:RACE_START, finishClock:RACE_FINISH, el:RACE_FINISH - RACE_START, startFixed:true});
+  function raceResult(){ return fixStart(raceResultRaw()); }
+  function raceResultRaw(){
     const lv = W.live;
     if(lv && lv.state === "finished" && lv.goal && raceStarted()){
       const st = lv.at - (Number(lv.el) || 0)*1000, day0 = RACE_DAY0;
@@ -122,7 +126,7 @@ window.Watch = (()=>{
       <div style="font-size:12px;font-weight:700;letter-spacing:3px;color:#ffd27a">KOBE MARATHON 2026</div>
       <div style="font-size:20px;font-weight:900;margin:2px 0 8px">🏁 完走おめでとうございます！</div>
       <div class="spread"><span class="small muted">記録（ネットタイム）</span><b class="num" style="font-size:30px">${E.fmtDur(r.el)}</b></div>
-      <div class="spread small" style="margin-top:4px"><span>スタート <b class="num">${hms(r.startClock)}</b></span><span>フィニッシュ <b class="num">${hms(r.finishClock)}</b></span></div>
+      <div class="spread small" style="margin-top:4px"><span>スタート <b class="num">${hms(r.startClock)}</b>${r.startFixed ? `<small class="muted">（修正済み）</small>` : ""}</span><span>フィニッシュ <b class="num">${hms(r.finishClock)}</b>${r.startFixed ? `<small class="muted">（修正済み）</small>` : ""}</span></div>
       <button class="btn primary" data-w="cert" style="margin-top:10px">完走証を見る</button>
     </div>
     <div class="card"><div class="spread"><b>届いたメッセージ（${r.msgs.length}件）</b></div>
