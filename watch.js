@@ -152,6 +152,10 @@ window.Watch = (()=>{
   const GATES = [["御旅公園",3.8,"10:00"],["工業技術センター",8.0,"10:36"],["須磨一ノ谷プラザ",10.7,"10:59"],["舞子公園",17.5,"11:57"],
     ["大蔵海岸西",20.7,"12:25"],["舞子駅",23.9,"12:53"],["垂水下水処理場",27.1,"13:23"],["須磨一ノ谷プラザ",31.1,"14:02"],
     ["須磨海浜公園",32.7,"14:18"],["駒ヶ林会館",35.4,"14:46"],["中央卸売市場第7門",39.8,"15:33"]];
+  // 大会のペース配分（ランナーのアプリと同じ基本の配分）
+  const SEGS = [[3.8,"8:30"],[20.7,"8:15"],[23.9,"8:30"],[27.1,"8:45"],[31.1,"9:00"],[32.7,"9:30"],[35.4,"10:00"],[39.8,"10:30"],[42.195,"11:00"]].map(([to,p])=>[to, Number(p.split(":")[0])*60 + Number(p.split(":")[1])]);
+  const segPace = km=>{ for(const [to,p] of SEGS) if(km < to) return p; return SEGS[SEGS.length-1][1]; };
+  function planTime(a, b){ let t = 0, from = 0; for(const [to,p] of SEGS){ const x = Math.max(a, from), y = Math.min(b, to); if(y > x) t += (y - x)*p; from = to; } return t; }
   function trueKm(lv){
     const c = course();
     if(!lv || !c || !lv.pos || lv.sim || lv.state !== "running") return lv;
@@ -169,11 +173,25 @@ window.Watch = (()=>{
     W.tk.km = prev != null ? Math.max(prev - 0.05, pr.km) : pr.km;
     const km = W.tk.km;
     if(d - km < 0.15) return lv;   // ずれが小さい（またはアプリが短め）ときは、アプリの距離のまま
-    const out = Object.assign({}, lv, {dist:km, appDist:d, fixedKm:true, off:false, near:false, cur:null, cum:null, predPlan:null, predRecent:null, laps:[], avg:km > 0.3 ? lv.el/km : null});
+    // 本当の距離の移り変わりから、今のペースを推定する（3〜6分前と比べる）
+    const h = W.tk.hist || (W.tk.hist = []);
+    if(!h.length || h[h.length-1][0] !== lv.at) h.push([lv.at, km]);
+    while(h.length > 1 && lv.at - h[0][0] > 600000) h.shift();
+    let cur = null;
+    const ref = h.filter(x=>lv.at - x[0] >= 180000).pop() || (lv.at - h[0][0] >= 90000 ? h[0] : null);
+    if(ref){ const dk = km - ref[1], dt = (lv.at - ref[0])/1000; if(dk > 0.1 && dt > 60 && dt/dk > 150 && dt/dk < 3600) cur = dt/dk; }   // キロ2分30秒〜60分の範囲だけ使う
+    const el = Number(lv.el) || 0, avg = km > 0.3 ? el/km : null, clock = (Number(lv.startClock) || 0) + el;
+    const pace = cur || avg;
+    const out = Object.assign({}, lv, {dist:km, appDist:d, fixedKm:true, off:false, near:false, laps:[],
+      cur, avg, target:segPace(km),
+      cum:Math.round(clock - ((Number(lv.startClock) || 0) + planTime(0, km))),                 // 予定より何秒遅れているか（マイナスは早い）
+      predPlan:clock + planTime(km, 42.195),                                                  // これから予定のペースで走ったとき
+      predRecent:pace ? clock + (42.195 - km)*pace : null});                                  // 今のペースのまま走ったとき
     // 次の関門も、本当の距離で出し直す
     const ng = GATES.find(g=>g[1] > km + 0.02);
     if(ng){ const close = E.parseHM(ng[2]), t = new Date(lv.at), clock = t.getHours()*3600 + t.getMinutes()*60 + t.getSeconds(), left = close - clock, rem = ng[1] - km;
-      out.gate = {name:ng[0], km:ng[1], close, rem, left, req:left > 0 && rem > 0 ? left/rem : null, margin:null}; }
+      const i = GATES.indexOf(ng), etaGate = clock + planTime(km, ng[1]);
+      out.gate = {name:ng[0], km:ng[1], close, rem, left, req:left > 0 && rem > 0 ? left/rem : null, margin:Math.round(close - etaGate), need:([5,7,9][i] ?? 10)*60}; }
     else out.gate = null;
     return out;
   }
@@ -210,7 +228,7 @@ window.Watch = (()=>{
     body.innerHTML = `
       <div class="card">
         <div class="spread"><b>${esc(lv.name || "ランナー")}</b><span class="small muted">スタート ${E.fmtClockS(lv.startClock)}</span></div>
-        ${lv.fixedKm ? `<p class="small" style="margin:0 0 6px;color:#ffd27a">ランナーのアプリの距離（${fmtKm(lv.appDist)}km）が進みすぎているため、実際の位置（白い丸）から求めた距離を出しています。</p>` : ""}
+        ${lv.fixedKm ? `<p class="small" style="margin:0 0 6px;color:#ffd27a">ランナーのアプリの距離（${fmtKm(lv.appDist)}km）が進みすぎているため、実際の位置（白い丸）から求めた距離を出しています。ペース・予定との差・ゴール予想・関門の余裕も、この距離からの推定です。</p>` : ""}
         <div class="big"><div class="d num"><span>${fmtKm(lv.dist)}</span><small>km</small></div><div class="t"><b class="num">${E.fmtDur(liveEl(lv))}</b><span>スタートから</span></div></div>
         <div class="tiles">
           <div><span>目標ペース</span><b>${E.fmtPace(lv.target)}</b></div>
